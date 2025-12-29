@@ -4,6 +4,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Badge } from '@/components/ui/badge';
+import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import Icon from '@/components/ui/icon';
@@ -13,6 +15,7 @@ import { TicketForm } from '@/components/TicketForm';
 import { ReleaseDetails } from '@/components/ReleaseDetails';
 import { ThemeSelector } from '@/components/ThemeSelector';
 import { ProfilePage } from '@/components/ProfilePage';
+import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { mockDb } from '@/lib/mockData';
 import type { User, Release, Ticket } from '@/lib/db';
@@ -36,9 +39,7 @@ const Index = () => {
   const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [showRegisterPassword, setShowRegisterPassword] = useState(false);
   const [showResetForm, setShowResetForm] = useState(false);
-  const [showAuthDialog, setShowAuthDialog] = useState(false);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+  const [showMobileMenu, setShowMobileMenu] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -74,18 +75,12 @@ const Index = () => {
       const data = await response.json();
 
       if (data.success) {
-        setIsLoading(true);
-        setShowAuthDialog(false);
-        
-        setTimeout(() => {
-          setCurrentUser(data.user);
-          setCurrentView('dashboard');
-          setIsLoading(false);
-          toast({
-            title: `Добро пожаловать, ${data.user.name}!`,
-            description: data.user.role === 'admin' ? 'Панель модератора' : 'Личный кабинет',
-          });
-        }, 1500);
+        setCurrentUser(data.user);
+        setCurrentView('dashboard');
+        toast({
+          title: `Добро пожаловать, ${data.user.name}!`,
+          description: data.user.role === 'admin' ? 'Панель модератора' : 'Личный кабинет',
+        });
       } else {
         toast({
           title: "Ошибка входа",
@@ -118,18 +113,12 @@ const Index = () => {
       const data = await response.json();
 
       if (data.success) {
-        setIsLoading(true);
-        setShowAuthDialog(false);
-        
-        setTimeout(() => {
-          setCurrentUser(data.user);
-          setCurrentView('dashboard');
-          setIsLoading(false);
-          toast({
-            title: "Регистрация успешна!",
-            description: "Добро пожаловать в kedoo!"
-          });
-        }, 1500);
+        setCurrentUser(data.user);
+        setCurrentView('dashboard');
+        toast({
+          title: "Регистрация успешна!",
+          description: "Добро пожаловать в kedoo!"
+        });
       } else {
         toast({
           title: "Ошибка регистрации",
@@ -230,23 +219,50 @@ const Index = () => {
   };
 
   const handleDeleteRelease = (id: number) => {
-    mockDb.releases.delete(id);
-    mockDb.tracks.deleteByReleaseId(id);
-    setDeleteDialog(null);
-    toast({ title: "Релиз удалён" });
+    const release = mockDb.releases.findById(id);
+    if (release?.status === 'deleted') {
+      mockDb.releases.permanentDelete(id);
+      setDeleteDialog(null);
+      toast({ title: "Релиз удалён навсегда" });
+    } else {
+      mockDb.releases.delete(id);
+      setDeleteDialog(null);
+      toast({ title: "Релиз перемещён в корзину" });
+    }
+  };
+
+  const handleRestoreRelease = (id: number) => {
+    const release = mockDb.releases.findById(id);
+    if (release && release.rejection_reason?.startsWith('_prev_status:')) {
+      const prevStatus = release.rejection_reason.replace('_prev_status:', '') as any;
+      mockDb.releases.update(id, { 
+        status: prevStatus,
+        rejection_reason: undefined
+      });
+      toast({ title: "Релиз восстановлен" });
+    } else if (release) {
+      mockDb.releases.update(id, { status: 'approved', rejection_reason: undefined });
+      toast({ title: "Релиз восстановлен" });
+    }
+  };
+
+  const handleRemoveFromModeration = (id: number) => {
+    mockDb.releases.update(id, { status: 'draft' });
+    toast({ title: "Релиз снят с модерации" });
   };
 
   const handleApproveRelease = (id: number) => {
     mockDb.releases.update(id, { status: 'approved', rejection_reason: undefined });
-    toast({ title: "Релиз одобрен" });
+    toast({ title: "Релиз принят" });
   };
 
   const handleRejectRelease = (id: number, reason: string) => {
     mockDb.releases.update(id, { status: 'rejected', rejection_reason: reason });
-    toast({ title: "Релиз отклонён", variant: "destructive" });
+    setSelectedRelease(null);
+    toast({ title: "Релиз отклонён" });
   };
 
-  const handleSaveTicket = (data: any) => {
+  const handleCreateTicket = (data: { subject: string; message: string }) => {
     mockDb.tickets.create({
       ...data,
       user_id: currentUser!.id,
@@ -256,616 +272,519 @@ const Index = () => {
     toast({ title: "Тикет создан" });
   };
 
-  const handleTicketResponse = (ticketId: number, response: string) => {
-    mockDb.tickets.update(ticketId, { 
-      status: 'answered',
-      admin_response: response,
-      admin_id: currentUser!.id,
-      updated_at: new Date().toISOString()
-    });
-    setSelectedTicket(null);
-    setAdminResponse('');
-    toast({ title: "Ответ отправлен" });
+  const handleRespondToTicket = (ticketId: number) => {
+    if (adminResponse.trim()) {
+      mockDb.tickets.update(ticketId, {
+        status: 'answered',
+        admin_response: adminResponse
+      });
+      setSelectedTicket(null);
+      setAdminResponse('');
+      toast({ title: "Ответ отправлен" });
+    }
   };
 
   const handleCloseTicket = (ticketId: number) => {
     mockDb.tickets.update(ticketId, { status: 'closed' });
+    setSelectedTicket(null);
     toast({ title: "Тикет закрыт" });
   };
 
-  const handleLogout = () => {
-    setCurrentUser(null);
-    setCurrentView('landing');
-    setActiveTab('releases');
-    toast({ title: "Вы вышли из системы" });
+  const getStatusBadge = (status: string) => {
+    const variants: Record<string, any> = {
+      draft: { label: 'Черновик', variant: 'secondary' },
+      moderation: { label: 'На модерации', variant: 'default' },
+      approved: { label: 'Принят', variant: 'default' },
+      rejected: { label: 'Отклонён', variant: 'destructive' },
+      deleted: { label: 'Удалён', variant: 'outline' }
+    };
+    const config = variants[status] || variants.draft;
+    return <Badge variant={config.variant}>{config.label}</Badge>;
   };
 
-  const scrollToSection = (sectionId: string) => {
-    const element = document.getElementById(sectionId);
-    if (element) {
-      element.scrollIntoView({ behavior: 'smooth' });
-      setMobileMenuOpen(false);
-    }
-  };
+  const userReleases = currentUser ? mockDb.releases.findByUserId(currentUser.id) : [];
+  const deletedReleases = currentUser ? mockDb.releases.findDeletedByUserId(currentUser.id) : [];
+  const userTickets = currentUser ? mockDb.tickets.findByUserId(currentUser.id) : [];
+  const moderationReleases = mockDb.releases.findByStatus('moderation');
+  const allTickets = mockDb.tickets.findAll();
+  
+  const filteredUserReleases = userReleases.filter(r => {
+    const matchesSearch = searchQuery ? r.title.toLowerCase().includes(searchQuery.toLowerCase()) : true;
+    const matchesGenre = genreFilter === 'all' ? true : r.genre === genreFilter;
+    return matchesSearch && matchesGenre;
+  });
+  
+  const filteredModerationReleases = moderationReleases.filter(r => {
+    const matchesSearch = searchQuery ? r.title.toLowerCase().includes(searchQuery.toLowerCase()) : true;
+    const matchesGenre = genreFilter === 'all' ? true : r.genre === genreFilter;
+    return matchesSearch && matchesGenre;
+  });
 
-  // Loading Screen
-  if (isLoading) {
+  const filteredUserTickets = userTickets.filter(t => {
+    if (ticketFilter === 'all') return true;
+    return t.status === ticketFilter;
+  });
+
+  const filteredAllTickets = allTickets.filter(t => {
+    if (ticketFilter === 'all') return true;
+    return t.status === ticketFilter;
+  });
+
+  if (currentView === 'landing' && !currentUser) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-gradient-to-br from-primary/20 via-background to-primary/10 animate-in fade-in duration-300">
-        <div className="flex flex-col items-center gap-8 animate-in zoom-in-95 duration-500">
-          {/* Animated Vinyl Record */}
-          <div className="relative">
-            {/* Outer glow */}
-            <div className="absolute inset-0 bg-primary/20 rounded-full blur-2xl animate-pulse" />
-            
-            {/* Spinning vinyl */}
-            <div className="relative w-32 h-32 rounded-full bg-gradient-to-br from-primary/90 to-primary/60 shadow-2xl animate-spin" style={{ animationDuration: '3s' }}>
-              {/* Center hole */}
-              <div className="absolute inset-0 flex items-center justify-center">
-                <div className="w-8 h-8 rounded-full bg-background border-4 border-primary/30" />
-              </div>
-              {/* Vinyl grooves */}
-              <div className="absolute inset-4 rounded-full border-2 border-primary/20" />
-              <div className="absolute inset-8 rounded-full border-2 border-primary/20" />
-              <div className="absolute inset-12 rounded-full border-2 border-primary/20" />
-            </div>
-            
-            {/* Music note icon in center */}
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <Icon name="music" className="w-6 h-6 text-background animate-pulse" />
-            </div>
-          </div>
-
-          {/* Audio wave visualization */}
-          <div className="flex items-center gap-1.5">
-            {[...Array(5)].map((_, i) => (
-              <div
-                key={i}
-                className="w-1 bg-primary rounded-full animate-pulse"
-                style={{
-                  height: `${24 + Math.sin(i) * 12}px`,
-                  animationDelay: `${i * 0.15}s`,
-                  animationDuration: '1s'
-                }}
+      <div className="min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-orange-50 dark:from-gray-900 dark:via-purple-900/20 dark:to-gray-900">
+        <nav className="fixed top-0 left-0 right-0 z-50 glass border-b">
+          <div className="container mx-auto px-4 py-4 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <img 
+                src="https://cdn.poehali.dev/projects/7d7646b6-3be9-4719-af6a-6713600b76e2/files/60a207b7-fe3a-4f6f-ad9a-e0209e288b32.jpg" 
+                alt="kedoo logo" 
+                className="w-10 h-10 rounded-xl object-cover" 
               />
-            ))}
+              <span className="text-2xl font-bold gradient-text">kedoo</span>
+            </div>
+            <ThemeSelector theme={theme} onThemeChange={changeTheme} />
           </div>
+        </nav>
 
-          {/* Loading text */}
-          <div className="text-center space-y-2 animate-in fade-in duration-700 delay-300">
-            <p className="text-2xl font-bold bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent">
-              Загрузка...
-            </p>
-            <p className="text-sm text-muted-foreground animate-pulse">
-              Подготовка вашего пространства
-            </p>
+        <section className="pt-32 pb-20 px-4">
+          <div className="container mx-auto max-w-6xl">
+            <div className="grid lg:grid-cols-2 gap-12 items-center">
+              <div className="space-y-6 animate-fade-in">
+                <h1 className="text-5xl md:text-6xl font-bold leading-tight">
+                  Дистрибьюция <span className="gradient-text">музыки</span> для всех
+                </h1>
+                <p className="text-lg text-muted-foreground">
+                  Мы — kedoo, дочерняя компания Radish. Бывший OLPROD, MMUSIC. 
+                  Занимаемся продвижением артистов и музыкой с 2021 года.
+                </p>
+                <p className="text-lg font-medium text-foreground">
+                  Мы считаем, что выгрузка доступна всем и роялти тоже, поэтому не берём их.
+                </p>
+              </div>
+              <div className="relative">
+                <img
+                  src="https://cdn.poehali.dev/projects/7d7646b6-3be9-4719-af6a-6713600b76e2/files/abeca212-8751-4f91-badf-4930bbcfb822.jpg"
+                  alt="Music Distribution"
+                  className="rounded-2xl shadow-2xl w-full animate-scale-in"
+                />
+              </div>
+            </div>
           </div>
-        </div>
+        </section>
+
+        <section className="py-20 px-4 bg-white/50 dark:bg-black/20">
+          <div className="container mx-auto max-w-4xl">
+            <h2 className="text-4xl font-bold text-center mb-12">
+              Почему <span className="gradient-text">kedoo</span>?
+            </h2>
+            <div className="grid md:grid-cols-3 gap-8">
+              {[
+                { icon: 'Zap', title: 'Быстро', desc: 'Загрузите релиз за минуты' },
+                { icon: 'DollarSign', title: 'Без комиссий', desc: 'Все роялти остаются вам' },
+                { icon: 'Shield', title: 'Надёжно', desc: 'Опыт работы с 2021 года' },
+              ].map((item, i) => (
+                <Card key={i} className="text-center hover:shadow-lg transition-shadow">
+                  <CardHeader>
+                    <div className="w-16 h-16 mx-auto rounded-full gradient-primary flex items-center justify-center mb-4">
+                      <Icon name={item.icon} className="text-white" size={28} />
+                    </div>
+                    <CardTitle>{item.title}</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-muted-foreground">{item.desc}</p>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="py-20 px-4 bg-gradient-to-r from-purple-600 via-pink-600 to-orange-500">
+          <div className="container mx-auto max-w-4xl text-center text-white space-y-6">
+            <h2 className="text-4xl md:text-5xl font-bold">Готовы начать?</h2>
+            <p className="text-xl opacity-90">Присоединяйтесь к тысячам артистов</p>
+            <Card className="max-w-md mx-auto mt-8">
+              <CardHeader>
+                <CardTitle className="text-2xl">Вход / Регистрация</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <Tabs defaultValue="login">
+                  <TabsList className="grid w-full grid-cols-2 mb-4">
+                    <TabsTrigger value="login">Вход</TabsTrigger>
+                    <TabsTrigger value="register">Регистрация</TabsTrigger>
+                  </TabsList>
+                  
+                  <TabsContent value="login">
+                    <form onSubmit={handleLogin} className="space-y-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="login-email">Email</Label>
+                        <Input name="email" id="login-email" type="email" required />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="login-password">Пароль</Label>
+                        <div className="relative">
+                          <Input name="password" id="login-password" type={showLoginPassword ? "text" : "password"} required className="pr-10" />
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="absolute right-0 top-0 h-full"
+                            onClick={() => setShowLoginPassword(!showLoginPassword)}
+                          >
+                            <Icon name={showLoginPassword ? "EyeOff" : "Eye"} size={18} />
+                          </Button>
+                        </div>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="link"
+                        className="text-sm p-0 h-auto"
+                        onClick={() => setShowResetForm(true)}
+                      >
+                        Забыли пароль?
+                      </Button>
+                      <Button type="submit" className="w-full gradient-primary text-white">
+                        Войти
+                      </Button>
+                    </form>
+                  </TabsContent>
+                  
+                  <TabsContent value="register">
+                    <form onSubmit={handleRegister} className="space-y-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="register-name">Имя</Label>
+                        <Input name="name" id="register-name" required />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="register-email">Email</Label>
+                        <Input name="email" id="register-email" type="email" required />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="register-password">Пароль</Label>
+                        <div className="relative">
+                          <Input name="password" id="register-password" type={showRegisterPassword ? "text" : "password"} required className="pr-10" />
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="absolute right-0 top-0 h-full"
+                            onClick={() => setShowRegisterPassword(!showRegisterPassword)}
+                          >
+                            <Icon name={showRegisterPassword ? "EyeOff" : "Eye"} size={18} />
+                          </Button>
+                        </div>
+                      </div>
+                      <Button type="submit" className="w-full gradient-primary text-white">
+                        Зарегистрироваться
+                      </Button>
+                    </form>
+                  </TabsContent>
+                </Tabs>
+              </CardContent>
+            </Card>
+          </div>
+        </section>
+
+        <Dialog open={showResetForm} onOpenChange={setShowResetForm}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Восстановление пароля</DialogTitle>
+            </DialogHeader>
+            <form onSubmit={handleResetPassword} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="reset-email">Email</Label>
+                <Input name="email" id="reset-email" type="email" required />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="reset-password">Новый пароль</Label>
+                <Input name="new_password" id="reset-password" type="password" required />
+              </div>
+              <div className="flex gap-2 justify-end">
+                <Button type="button" variant="outline" onClick={() => setShowResetForm(false)}>
+                  Отмена
+                </Button>
+                <Button type="submit" className="gradient-primary text-white">
+                  Сбросить пароль
+                </Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
       </div>
     );
   }
 
-  // Dashboard view (unchanged)
-  if (currentView === 'dashboard') {
-    const userReleases = mockDb.releases.getByUserId(currentUser!.id);
-    const drafts = userReleases.filter(r => r.status === 'draft');
-    const moderation = userReleases.filter(r => r.status === 'moderation');
-    const approved = userReleases.filter(r => r.status === 'approved');
-    const rejected = userReleases.filter(r => r.status === 'rejected');
-    
-    const allReleases = currentUser?.role === 'admin' 
-      ? mockDb.releases.getAll() 
-      : userReleases;
+  if (currentView === 'profile' && currentUser) {
+    return <ProfilePage user={currentUser} onBack={() => setCurrentView('dashboard')} />;
+  }
 
-    const filteredReleases = allReleases.filter(release => {
-      const matchesSearch = release.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        release.artist.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesGenre = genreFilter === 'all' || release.genre === genreFilter;
-      return matchesSearch && matchesGenre;
-    });
-
-    const userTickets = currentUser?.role === 'admin' 
-      ? mockDb.tickets.getAll() 
-      : mockDb.tickets.getByUserId(currentUser!.id);
-
-    const filteredTickets = userTickets.filter(ticket => {
-      if (ticketFilter === 'all') return true;
-      return ticket.status === ticketFilter;
-    });
-
+  if (currentUser?.role === 'admin') {
     return (
       <div className="min-h-screen bg-background">
-        <header className="border-b bg-card/50 backdrop-blur-sm sticky top-0 z-50">
-          <div className="container mx-auto px-4 py-4 flex justify-between items-center">
-            <div className="flex items-center gap-3">
-              <Icon name="music" className="w-8 h-8 text-primary" />
-              <h1 className="text-2xl font-bold bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent">
-                kedoo
-              </h1>
+        <nav className="border-b">
+          <div className="container mx-auto px-4 py-4 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <img 
+                src="https://cdn.poehali.dev/projects/7d7646b6-3be9-4719-af6a-6713600b76e2/files/60a207b7-fe3a-4f6f-ad9a-e0209e288b32.jpg" 
+                alt="kedoo logo" 
+                className="w-10 h-10 rounded-xl object-cover" 
+              />
+              <span className="text-2xl font-bold gradient-text">kedoo</span>
+              <Badge variant="outline" className="ml-2">Модератор</Badge>
             </div>
-            <div className="flex items-center gap-4">
-              <ThemeSelector currentTheme={theme} onThemeChange={changeTheme} />
-              <Button variant="ghost" size="sm" onClick={() => setCurrentView('profile')}>
-                <Icon name="user" className="w-4 h-4 mr-2" />
-                {currentUser?.name}
+            <div className="flex items-center gap-2">
+              <ThemeSelector theme={theme} onThemeChange={changeTheme} />
+              <Button
+                variant="ghost"
+                size="icon"
+                className="rounded-full"
+                onClick={() => setCurrentView('profile')}
+              >
+                <Icon name="User" size={20} />
               </Button>
-              <Button variant="ghost" size="sm" onClick={handleLogout}>
-                <Icon name="log-out" className="w-4 h-4 mr-2" />
+              <Button variant="outline" onClick={() => { setCurrentUser(null); setCurrentView('landing'); }}>
+                <Icon name="LogOut" size={18} className="mr-2" />
                 Выйти
               </Button>
             </div>
           </div>
-        </header>
+        </nav>
 
-        <main className="container mx-auto px-4 py-8">
+        <div className="container mx-auto px-4 py-8">
+          <div className="mb-8">
+            <h1 className="text-3xl font-bold mb-2">Панель модератора</h1>
+            <p className="text-muted-foreground">Управление релизами и тикетами</p>
+          </div>
+
           <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-            <TabsList className="grid w-full grid-cols-2 lg:grid-cols-4">
-              <TabsTrigger value="releases" className="flex items-center gap-2">
-                <Icon name="disc" className="w-4 h-4" />
-                Релизы
+            <TabsList className="grid w-full max-w-md grid-cols-2">
+              <TabsTrigger value="moderation">
+                <Icon name="AlertCircle" size={18} className="mr-2" />
+                На модерации ({moderationReleases.length})
               </TabsTrigger>
-              <TabsTrigger value="drafts" className="flex items-center gap-2">
-                <Icon name="file-text" className="w-4 h-4" />
-                Черновики ({drafts.length})
-              </TabsTrigger>
-              <TabsTrigger value="moderation" className="flex items-center gap-2">
-                <Icon name="clock" className="w-4 h-4" />
-                На модерации ({moderation.length})
-              </TabsTrigger>
-              <TabsTrigger value="support" className="flex items-center gap-2">
-                <Icon name="message-circle" className="w-4 h-4" />
-                Поддержка
+              <TabsTrigger value="tickets">
+                <Icon name="MessageSquare" size={18} className="mr-2" />
+                Тикеты ({allTickets.filter(t => t.status !== 'closed').length})
               </TabsTrigger>
             </TabsList>
 
-            <TabsContent value="releases" className="space-y-4">
-              <div className="flex flex-col sm:flex-row gap-4 mb-6">
-                <div className="flex-1">
-                  <Input
-                    placeholder="Поиск по названию или исполнителю..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full"
-                  />
-                </div>
+            <TabsContent value="moderation" className="space-y-4">
+              <div className="flex flex-wrap gap-2 mb-4">
+                <Input
+                  placeholder="Поиск по названию..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="max-w-md"
+                />
                 <Select value={genreFilter} onValueChange={setGenreFilter}>
-                  <SelectTrigger className="w-full sm:w-[180px]">
-                    <SelectValue placeholder="Жанр" />
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue placeholder="Все жанры" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">Все жанры</SelectItem>
-                    <SelectItem value="pop">Pop</SelectItem>
-                    <SelectItem value="rock">Rock</SelectItem>
-                    <SelectItem value="electronic">Electronic</SelectItem>
-                    <SelectItem value="hip-hop">Hip-Hop</SelectItem>
-                    <SelectItem value="jazz">Jazz</SelectItem>
-                    <SelectItem value="classical">Classical</SelectItem>
+                    <SelectItem value="Pop">Pop</SelectItem>
+                    <SelectItem value="Rock">Rock</SelectItem>
+                    <SelectItem value="Hip-Hop">Hip-Hop</SelectItem>
+                    <SelectItem value="Electronic">Electronic</SelectItem>
+                    <SelectItem value="Jazz">Jazz</SelectItem>
+                    <SelectItem value="Classical">Classical</SelectItem>
+                    <SelectItem value="Other">Другое</SelectItem>
                   </SelectContent>
                 </Select>
-                <Button onClick={() => setShowReleaseForm(true)}>
-                  <Icon name="plus" className="w-4 h-4 mr-2" />
-                  Новый релиз
-                </Button>
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {filteredReleases.map(release => (
-                  <Card key={release.id} className="overflow-hidden hover:shadow-lg transition-shadow">
-                    <div className="aspect-square bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center">
-                      {release.cover_url ? (
-                        <img src={release.cover_url} alt={release.title} className="w-full h-full object-cover" />
-                      ) : (
-                        <Icon name="disc" className="w-16 h-16 text-primary/40" />
-                      )}
-                    </div>
-                    <CardHeader>
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          <CardTitle className="line-clamp-1">{release.title}</CardTitle>
-                          <CardDescription>{release.artist}</CardDescription>
-                        </div>
-                        <div className="flex gap-1">
-                          {release.status === 'approved' && (
-                            <div className="bg-green-500/10 text-green-600 dark:text-green-400 px-2 py-1 rounded text-xs">
-                              Опубликован
-                            </div>
-                          )}
-                          {release.status === 'moderation' && (
-                            <div className="bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 px-2 py-1 rounded text-xs">
-                              Модерация
-                            </div>
-                          )}
-                          {release.status === 'rejected' && (
-                            <div className="bg-red-500/10 text-red-600 dark:text-red-400 px-2 py-1 rounded text-xs">
-                              Отклонён
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="flex flex-wrap gap-2 mb-4">
-                        <span className="text-xs bg-primary/10 text-primary px-2 py-1 rounded">{release.genre}</span>
-                        <span className="text-xs bg-secondary text-secondary-foreground px-2 py-1 rounded">
-                          {new Date(release.release_date).getFullYear()}
-                        </span>
-                      </div>
-                      <div className="flex gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="flex-1"
-                          onClick={() => setViewDetailsRelease(release)}
-                        >
-                          <Icon name="eye" className="w-4 h-4 mr-2" />
-                          Подробнее
-                        </Button>
-                        {(currentUser?.role === 'admin' || release.user_id === currentUser?.id) && (
-                          <>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => {
-                                setEditingRelease(release);
-                                setShowReleaseForm(true);
-                              }}
-                            >
-                              <Icon name="edit" className="w-4 h-4" />
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => setDeleteDialog(release.id)}
-                            >
-                              <Icon name="trash" className="w-4 h-4" />
-                            </Button>
-                          </>
-                        )}
-                      </div>
-                      {currentUser?.role === 'admin' && release.status === 'moderation' && (
-                        <div className="flex gap-2 mt-2">
-                          <Button
-                            size="sm"
-                            className="flex-1 bg-green-600 hover:bg-green-700"
-                            onClick={() => handleApproveRelease(release.id)}
-                          >
-                            <Icon name="check" className="w-4 h-4 mr-2" />
-                            Одобрить
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="destructive"
-                            className="flex-1"
-                            onClick={() => setSelectedRelease(release)}
-                          >
-                            <Icon name="x" className="w-4 h-4 mr-2" />
-                            Отклонить
-                          </Button>
-                        </div>
-                      )}
-                      {release.status === 'rejected' && release.rejection_reason && (
-                        <div className="mt-2 p-2 bg-red-500/10 border border-red-500/20 rounded text-sm text-red-600 dark:text-red-400">
-                          <p className="font-semibold">Причина отклонения:</p>
-                          <p className="mt-1">{release.rejection_reason}</p>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-
-              {filteredReleases.length === 0 && (
-                <div className="text-center py-12">
-                  <Icon name="disc" className="w-16 h-16 mx-auto text-muted-foreground mb-4" />
-                  <p className="text-muted-foreground">Релизы не найдены</p>
-                </div>
-              )}
-            </TabsContent>
-
-            <TabsContent value="drafts" className="space-y-4">
-              <div className="flex justify-between items-center mb-6">
-                <h2 className="text-2xl font-bold">Черновики</h2>
-                <Button onClick={() => setShowReleaseForm(true)}>
-                  <Icon name="plus" className="w-4 h-4 mr-2" />
-                  Новый релиз
-                </Button>
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {drafts.map(release => (
-                  <Card key={release.id} className="overflow-hidden">
-                    <div className="aspect-square bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center">
-                      {release.cover_url ? (
-                        <img src={release.cover_url} alt={release.title} className="w-full h-full object-cover" />
-                      ) : (
-                        <Icon name="disc" className="w-16 h-16 text-primary/40" />
-                      )}
-                    </div>
-                    <CardHeader>
-                      <CardTitle className="line-clamp-1">{release.title}</CardTitle>
-                      <CardDescription>{release.artist}</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="flex gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="flex-1"
-                          onClick={() => {
-                            setEditingRelease(release);
-                            setShowReleaseForm(true);
-                          }}
-                        >
-                          <Icon name="edit" className="w-4 h-4 mr-2" />
-                          Редактировать
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setDeleteDialog(release.id)}
-                        >
-                          <Icon name="trash" className="w-4 h-4" />
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-
-              {drafts.length === 0 && (
-                <div className="text-center py-12">
-                  <Icon name="file-text" className="w-16 h-16 mx-auto text-muted-foreground mb-4" />
-                  <p className="text-muted-foreground mb-4">У вас нет черновиков</p>
-                  <Button onClick={() => setShowReleaseForm(true)}>
-                    <Icon name="plus" className="w-4 h-4 mr-2" />
-                    Создать релиз
-                  </Button>
-                </div>
-              )}
-            </TabsContent>
-
-            <TabsContent value="moderation" className="space-y-4">
-              <h2 className="text-2xl font-bold mb-6">На модерации</h2>
-
-              <div className="grid gap-4">
-                {moderation.map(release => (
-                  <Card key={release.id}>
-                    <CardHeader>
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <CardTitle>{release.title}</CardTitle>
-                          <CardDescription>{release.artist}</CardDescription>
-                        </div>
-                        <div className="bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 px-3 py-1 rounded">
-                          На модерации
-                        </div>
-                      </div>
-                    </CardHeader>
-                    <CardContent>
-                      <p className="text-sm text-muted-foreground">
-                        Отправлено: {new Date(release.created_at).toLocaleDateString('ru-RU')}
-                      </p>
-                    </CardContent>
-                  </Card>
-                ))}
-                {approved.map(release => (
-                  <Card key={release.id}>
-                    <CardHeader>
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <CardTitle>{release.title}</CardTitle>
-                          <CardDescription>{release.artist}</CardDescription>
-                        </div>
-                        <div className="bg-green-500/10 text-green-600 dark:text-green-400 px-3 py-1 rounded">
-                          Одобрен
-                        </div>
-                      </div>
-                    </CardHeader>
-                  </Card>
-                ))}
-                {rejected.map(release => (
-                  <Card key={release.id}>
-                    <CardHeader>
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <CardTitle>{release.title}</CardTitle>
-                          <CardDescription>{release.artist}</CardDescription>
-                        </div>
-                        <div className="bg-red-500/10 text-red-600 dark:text-red-400 px-3 py-1 rounded">
-                          Отклонён
-                        </div>
-                      </div>
-                    </CardHeader>
-                    {release.rejection_reason && (
-                      <CardContent>
-                        <div className="p-3 bg-red-500/10 border border-red-500/20 rounded">
-                          <p className="font-semibold text-sm text-red-600 dark:text-red-400">Причина отклонения:</p>
-                          <p className="mt-1 text-sm">{release.rejection_reason}</p>
-                        </div>
-                      </CardContent>
-                    )}
-                  </Card>
-                ))}
-              </div>
-
-              {moderation.length === 0 && approved.length === 0 && rejected.length === 0 && (
-                <div className="text-center py-12">
-                  <Icon name="clock" className="w-16 h-16 mx-auto text-muted-foreground mb-4" />
-                  <p className="text-muted-foreground">Нет релизов на модерации</p>
-                </div>
-              )}
-            </TabsContent>
-
-            <TabsContent value="support" className="space-y-4">
-              <div className="flex justify-between items-center mb-6">
-                <h2 className="text-2xl font-bold">Поддержка</h2>
-                {currentUser?.role !== 'admin' && (
-                  <Button onClick={() => setShowTicketForm(true)}>
-                    <Icon name="plus" className="w-4 h-4 mr-2" />
-                    Новый тикет
+                {searchQuery && (
+                  <Button variant="ghost" onClick={() => setSearchQuery('')}>
+                    <Icon name="X" size={18} />
                   </Button>
                 )}
               </div>
-
-              {currentUser?.role === 'admin' && (
-                <div className="mb-4">
-                  <Select value={ticketFilter} onValueChange={(value: any) => setTicketFilter(value)}>
-                    <SelectTrigger className="w-[200px]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Все тикеты</SelectItem>
-                      <SelectItem value="open">Открытые</SelectItem>
-                      <SelectItem value="answered">Отвеченные</SelectItem>
-                      <SelectItem value="closed">Закрытые</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-
-              <div className="grid gap-4">
-                {filteredTickets.map(ticket => {
-                  const ticketUser = mockDb.users.getById(ticket.user_id);
+              
+              {filteredModerationReleases.length === 0 ? (
+                <Card>
+                  <CardContent className="py-12 text-center">
+                    <Icon name="CheckCircle" size={48} className="mx-auto text-muted-foreground mb-4" />
+                    <p className="text-muted-foreground">Нет релизов на модерации</p>
+                  </CardContent>
+                </Card>
+              ) : (
+                filteredModerationReleases.map(release => {
+                  const tracks = mockDb.tracks.findByReleaseId(release.id);
+                  const author = mockDb.users.findById(release.user_id);
+                  
                   return (
-                    <Card key={ticket.id}>
+                    <Card key={release.id}>
                       <CardHeader>
                         <div className="flex items-start justify-between">
-                          <div className="flex-1">
-                            <CardTitle>{ticket.subject}</CardTitle>
-                            <CardDescription>
-                              {currentUser?.role === 'admin' && ticketUser && (
-                                <span>От: {ticketUser.name} ({ticketUser.email}) • </span>
-                              )}
-                              {new Date(ticket.created_at).toLocaleString('ru-RU')}
-                            </CardDescription>
-                          </div>
-                          <div className={`px-3 py-1 rounded text-sm ${
-                            ticket.status === 'open' ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400' :
-                            ticket.status === 'answered' ? 'bg-green-500/10 text-green-600 dark:text-green-400' :
-                            'bg-gray-500/10 text-gray-600 dark:text-gray-400'
-                          }`}>
-                            {ticket.status === 'open' ? 'Открыт' : 
-                             ticket.status === 'answered' ? 'Отвечен' : 'Закрыт'}
+                          <div className="flex gap-4">
+                            {release.cover_url && (
+                              <img src={release.cover_url} alt={release.title} className="w-20 h-20 rounded-lg object-cover" />
+                            )}
+                            <div>
+                              <CardTitle>{release.title}</CardTitle>
+                              <CardDescription>
+                                {release.genre} • {author?.name}
+                              </CardDescription>
+                              <div className="mt-2">
+                                {getStatusBadge(release.status)}
+                              </div>
+                            </div>
                           </div>
                         </div>
                       </CardHeader>
                       <CardContent className="space-y-4">
-                        <div>
-                          <p className="text-sm font-semibold mb-1">Сообщение:</p>
-                          <p className="text-sm">{ticket.message}</p>
+                        <div className="grid grid-cols-2 gap-4 text-sm">
+                          {release.upc && <div><span className="text-muted-foreground">UPC:</span> {release.upc}</div>}
+                          <div><span className="text-muted-foreground">Дата релиза:</span> {release.new_release_date}</div>
+                          {release.old_release_date && (
+                            <div><span className="text-muted-foreground">Старая дата:</span> {release.old_release_date}</div>
+                          )}
+                          <div><span className="text-muted-foreground">Треков:</span> {tracks.length}</div>
                         </div>
 
+                        <div>
+                          <h5 className="font-semibold mb-2">Треклист:</h5>
+                          <div className="space-y-2">
+                            {tracks.map((track, i) => (
+                              <div key={track.id} className="text-sm flex items-center gap-2">
+                                <span className="text-muted-foreground">{i + 1}.</span>
+                                <span>{track.title}</span>
+                                {track.has_explicit && <Badge variant="destructive" className="text-xs">E</Badge>}
+                                {track.audio_url && (
+                                  <a href={track.audio_url} download className="ml-auto">
+                                    <Button size="sm" variant="ghost">
+                                      <Icon name="Download" size={16} />
+                                    </Button>
+                                  </a>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="flex gap-2">
+                          <Button onClick={() => setViewDetailsRelease(release)} variant="outline">
+                            <Icon name="Eye" size={18} className="mr-2" />
+                            Детали
+                          </Button>
+                          {release.cover_url && (
+                            <a href={release.cover_url} download>
+                              <Button variant="outline">
+                                <Icon name="Download" size={18} className="mr-2" />
+                                Обложка
+                              </Button>
+                            </a>
+                          )}
+                          <Button onClick={() => handleApproveRelease(release.id)} className="gradient-primary text-white ml-auto">
+                            <Icon name="Check" size={18} className="mr-2" />
+                            Принять
+                          </Button>
+                          <Button onClick={() => setSelectedRelease(release)} variant="destructive">
+                            <Icon name="X" size={18} className="mr-2" />
+                            Отклонить
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })
+              )}
+            </TabsContent>
+
+            <TabsContent value="tickets" className="space-y-4">
+              <div className="flex gap-2 mb-4">
+                <Select value={ticketFilter} onValueChange={(value: any) => setTicketFilter(value)}>
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue placeholder="Все тикеты" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Все тикеты</SelectItem>
+                    <SelectItem value="open">Открытые</SelectItem>
+                    <SelectItem value="answered">Отвеченные</SelectItem>
+                    <SelectItem value="closed">Закрытые</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {filteredAllTickets.length === 0 ? (
+                <Card>
+                  <CardContent className="py-12 text-center">
+                    <Icon name="Inbox" size={48} className="mx-auto text-muted-foreground mb-4" />
+                    <p className="text-muted-foreground">Нет тикетов</p>
+                  </CardContent>
+                </Card>
+              ) : (
+                filteredAllTickets.map(ticket => {
+                  const user = mockDb.users.findById(ticket.user_id);
+                  return (
+                    <Card key={ticket.id}>
+                      <CardHeader>
+                        <div className="flex items-start justify-between">
+                          <div>
+                            <CardTitle className="text-lg">{ticket.subject}</CardTitle>
+                            <CardDescription>{user?.name} • {new Date(ticket.created_at).toLocaleDateString('ru-RU')}</CardDescription>
+                          </div>
+                          <Badge variant={ticket.status === 'closed' ? 'outline' : 'default'}>
+                            {ticket.status === 'open' ? 'Открыт' : ticket.status === 'answered' ? 'Отвечен' : 'Закрыт'}
+                          </Badge>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        <div>
+                          <p className="text-sm">{ticket.message}</p>
+                        </div>
                         {ticket.admin_response && (
-                          <div className="p-3 bg-primary/5 rounded">
-                            <p className="text-sm font-semibold mb-1">Ответ поддержки:</p>
+                          <div className="bg-muted p-4 rounded-lg">
+                            <p className="text-sm font-semibold mb-1">Ответ модератора:</p>
                             <p className="text-sm">{ticket.admin_response}</p>
                           </div>
                         )}
-
-                        {currentUser?.role === 'admin' && ticket.status === 'open' && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setSelectedTicket(ticket)}
-                          >
-                            <Icon name="message-circle" className="w-4 h-4 mr-2" />
-                            Ответить
-                          </Button>
-                        )}
-
-                        {currentUser?.role === 'admin' && ticket.status === 'answered' && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleCloseTicket(ticket.id)}
-                          >
-                            <Icon name="check" className="w-4 h-4 mr-2" />
-                            Закрыть тикет
-                          </Button>
+                        {ticket.status !== 'closed' && (
+                          <div className="flex gap-2">
+                            <Button onClick={() => setSelectedTicket(ticket)} variant="outline">
+                              <Icon name="Reply" size={18} className="mr-2" />
+                              Ответить
+                            </Button>
+                            <Button onClick={() => handleCloseTicket(ticket.id)} variant="outline">
+                              <Icon name="Check" size={18} className="mr-2" />
+                              Закрыть
+                            </Button>
+                          </div>
                         )}
                       </CardContent>
                     </Card>
                   );
-                })}
-              </div>
-
-              {filteredTickets.length === 0 && (
-                <div className="text-center py-12">
-                  <Icon name="message-circle" className="w-16 h-16 mx-auto text-muted-foreground mb-4" />
-                  <p className="text-muted-foreground mb-4">
-                    {currentUser?.role === 'admin' ? 'Нет тикетов' : 'У вас нет обращений в поддержку'}
-                  </p>
-                  {currentUser?.role !== 'admin' && (
-                    <Button onClick={() => setShowTicketForm(true)}>
-                      <Icon name="plus" className="w-4 h-4 mr-2" />
-                      Создать тикет
-                    </Button>
-                  )}
-                </div>
+                })
               )}
             </TabsContent>
           </Tabs>
-        </main>
-
-        <Dialog open={showReleaseForm} onOpenChange={setShowReleaseForm}>
-          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>
-                {editingRelease ? 'Редактировать релиз' : 'Новый релиз'}
-              </DialogTitle>
-            </DialogHeader>
-            <ReleaseForm
-              release={editingRelease || undefined}
-              onSave={handleSaveRelease}
-              onCancel={() => {
-                setShowReleaseForm(false);
-                setEditingRelease(null);
-              }}
-            />
-          </DialogContent>
-        </Dialog>
-
-        <Dialog open={showTicketForm} onOpenChange={setShowTicketForm}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Новое обращение в поддержку</DialogTitle>
-            </DialogHeader>
-            <TicketForm
-              onSave={handleSaveTicket}
-              onCancel={() => setShowTicketForm(false)}
-            />
-          </DialogContent>
-        </Dialog>
+        </div>
 
         <Dialog open={!!selectedRelease} onOpenChange={() => setSelectedRelease(null)}>
-          <DialogContent>
+          <DialogContent className="max-w-2xl">
             <DialogHeader>
               <DialogTitle>Отклонить релиз</DialogTitle>
             </DialogHeader>
             <div className="space-y-4">
-              <div>
-                <Label>Причина отклонения</Label>
-                <textarea
-                  className="w-full mt-2 p-2 border rounded min-h-[100px]"
-                  placeholder="Укажите причину отклонения..."
-                  id="rejection-reason"
-                />
-              </div>
+              <Label>Причина отклонения</Label>
+              <Textarea
+                placeholder="Укажите причину отклонения..."
+                rows={4}
+                value={adminResponse}
+                onChange={(e) => setAdminResponse(e.target.value)}
+              />
               <div className="flex gap-2 justify-end">
-                <Button variant="outline" onClick={() => setSelectedRelease(null)}>
+                <Button onClick={() => setSelectedRelease(null)} variant="outline">
                   Отмена
                 </Button>
                 <Button
-                  variant="destructive"
                   onClick={() => {
-                    const reason = (document.getElementById('rejection-reason') as HTMLTextAreaElement).value;
-                    if (reason.trim()) {
-                      handleRejectRelease(selectedRelease!.id, reason);
-                      setSelectedRelease(null);
+                    if (adminResponse.trim() && selectedRelease) {
+                      handleRejectRelease(selectedRelease.id, adminResponse);
+                      setAdminResponse('');
                     }
                   }}
+                  variant="destructive"
                 >
-                  Отклонить
+                  Отклонить релиз
                 </Button>
               </div>
             </div>
@@ -878,580 +797,435 @@ const Index = () => {
               <DialogTitle>Ответить на тикет</DialogTitle>
             </DialogHeader>
             <div className="space-y-4">
-              <div>
-                <p className="text-sm font-semibold mb-2">Сообщение пользователя:</p>
-                <p className="text-sm p-3 bg-muted rounded">{selectedTicket?.message}</p>
-              </div>
-              <div>
-                <Label>Ваш ответ</Label>
-                <textarea
-                  className="w-full mt-2 p-2 border rounded min-h-[100px]"
-                  placeholder="Введите ответ..."
-                  value={adminResponse}
-                  onChange={(e) => setAdminResponse(e.target.value)}
-                />
-              </div>
+              <Label>Ваш ответ</Label>
+              <Textarea
+                placeholder="Введите ответ..."
+                rows={4}
+                value={adminResponse}
+                onChange={(e) => setAdminResponse(e.target.value)}
+              />
               <div className="flex gap-2 justify-end">
-                <Button variant="outline" onClick={() => {
-                  setSelectedTicket(null);
-                  setAdminResponse('');
-                }}>
+                <Button onClick={() => setSelectedTicket(null)} variant="outline">
                   Отмена
                 </Button>
                 <Button
-                  onClick={() => {
-                    if (adminResponse.trim()) {
-                      handleTicketResponse(selectedTicket!.id, adminResponse);
-                    }
-                  }}
+                  onClick={() => selectedTicket && handleRespondToTicket(selectedTicket.id)}
+                  className="gradient-primary text-white"
                 >
-                  Отправить
+                  Отправить ответ
                 </Button>
               </div>
             </div>
           </DialogContent>
         </Dialog>
-
-        <AlertDialog open={!!deleteDialog} onOpenChange={() => setDeleteDialog(null)}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Удалить релиз?</AlertDialogTitle>
-              <AlertDialogDescription>
-                Это действие нельзя отменить. Релиз будет удалён безвозвратно.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Отмена</AlertDialogCancel>
-              <AlertDialogAction onClick={() => deleteDialog && handleDeleteRelease(deleteDialog)}>
-                Удалить
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
 
         <Dialog open={!!viewDetailsRelease} onOpenChange={() => setViewDetailsRelease(null)}>
           <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-            <ReleaseDetails release={viewDetailsRelease!} />
+            {viewDetailsRelease && (
+              <ReleaseDetails
+                release={viewDetailsRelease}
+                tracks={mockDb.tracks.findByReleaseId(viewDetailsRelease.id)}
+                onClose={() => setViewDetailsRelease(null)}
+                isAdmin={true}
+              />
+            )}
           </DialogContent>
         </Dialog>
       </div>
     );
   }
 
-  // Profile view (unchanged)
-  if (currentView === 'profile') {
-    return (
-      <div className="min-h-screen bg-background">
-        <header className="border-b bg-card/50 backdrop-blur-sm sticky top-0 z-50">
-          <div className="container mx-auto px-4 py-4 flex justify-between items-center">
-            <div className="flex items-center gap-3">
-              <Icon name="music" className="w-8 h-8 text-primary" />
-              <h1 className="text-2xl font-bold bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent">
-                kedoo
-              </h1>
-            </div>
-            <div className="flex items-center gap-4">
-              <ThemeSelector currentTheme={theme} onThemeChange={changeTheme} />
-              <Button variant="ghost" size="sm" onClick={() => setCurrentView('dashboard')}>
-                <Icon name="arrow-left" className="w-4 h-4 mr-2" />
-                Назад
-              </Button>
-              <Button variant="ghost" size="sm" onClick={handleLogout}>
-                <Icon name="log-out" className="w-4 h-4 mr-2" />
-                Выйти
-              </Button>
-            </div>
-          </div>
-        </header>
-
-        <main className="container mx-auto px-4 py-8">
-          <ProfilePage user={currentUser!} onUpdate={(updates) => {
-            const updatedUser = { ...currentUser!, ...updates };
-            setCurrentUser(updatedUser);
-            mockDb.users.update(currentUser!.id, updates);
-          }} />
-        </main>
-      </div>
-    );
-  }
-
-  // Landing Page
   return (
     <div className="min-h-screen bg-background">
-      {/* Navigation */}
-      <header className="border-b bg-card/50 backdrop-blur-sm sticky top-0 z-50">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex justify-between items-center">
-            <div className="flex items-center gap-3">
-              <Icon name="music" className="w-8 h-8 text-primary" />
-              <h1 className="text-2xl font-bold bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent">
-                kedoo
-              </h1>
-            </div>
-
-            {/* Desktop Navigation */}
-            <nav className="hidden md:flex items-center gap-6">
-              <button onClick={() => scrollToSection('features')} className="text-sm hover:text-primary transition-colors">
-                Возможности
-              </button>
-              <button onClick={() => scrollToSection('about')} className="text-sm hover:text-primary transition-colors">
-                О платформе
-              </button>
-              <button onClick={() => scrollToSection('contact')} className="text-sm hover:text-primary transition-colors">
-                Контакты
-              </button>
-              <ThemeSelector currentTheme={theme} onThemeChange={changeTheme} />
-              <Button onClick={() => setShowAuthDialog(true)} size="sm">
-                Войти
-              </Button>
-            </nav>
-
-            {/* Mobile Menu Button */}
-            <div className="flex md:hidden items-center gap-2">
-              <ThemeSelector currentTheme={theme} onThemeChange={changeTheme} />
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              >
-                <Icon name={mobileMenuOpen ? 'x' : 'menu'} className="w-5 h-5" />
-              </Button>
-            </div>
+      <nav className="border-b">
+        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Sheet>
+              <SheetTrigger asChild>
+                <Button variant="ghost" size="icon">
+                  <Icon name="Menu" size={24} />
+                </Button>
+              </SheetTrigger>
+              <SheetContent side="left">
+                <div className="flex flex-col gap-4 mt-8">
+                  <Button
+                    variant={activeTab === 'releases' ? 'default' : 'ghost'}
+                    className="justify-start"
+                    onClick={() => { setActiveTab('releases'); setShowReleaseForm(false); }}
+                  >
+                    <Icon name="Disc" size={18} className="mr-2" />
+                    Релизы
+                  </Button>
+                  <Button
+                    variant={showReleaseForm ? 'default' : 'ghost'}
+                    className="justify-start"
+                    onClick={() => { setShowReleaseForm(true); setEditingRelease(null); setActiveTab('releases'); }}
+                  >
+                    <Icon name="PlusCircle" size={18} className="mr-2" />
+                    Добавить релиз
+                  </Button>
+                  <Button
+                    variant={activeTab === 'tickets' ? 'default' : 'ghost'}
+                    className="justify-start"
+                    onClick={() => { setActiveTab('tickets'); setShowReleaseForm(false); }}
+                  >
+                    <Icon name="MessageSquare" size={18} className="mr-2" />
+                    Тикеты
+                  </Button>
+                  <Button
+                    variant={activeTab === 'trash' ? 'default' : 'ghost'}
+                    className="justify-start"
+                    onClick={() => { setActiveTab('trash'); setShowReleaseForm(false); }}
+                  >
+                    <Icon name="Trash2" size={18} className="mr-2" />
+                    Корзина
+                  </Button>
+                  <Button
+                    variant={activeTab === 'wallet' ? 'default' : 'ghost'}
+                    className="justify-start"
+                    onClick={() => { setActiveTab('wallet'); setShowReleaseForm(false); }}
+                  >
+                    <Icon name="Wallet" size={18} className="mr-2" />
+                    Кошелёк
+                  </Button>
+                  <div className="border-t my-4"></div>
+                  <Button
+                    variant="outline"
+                    className="justify-start"
+                    onClick={() => { setCurrentUser(null); setCurrentView('landing'); }}
+                  >
+                    <Icon name="LogOut" size={18} className="mr-2" />
+                    Выйти
+                  </Button>
+                </div>
+              </SheetContent>
+            </Sheet>
+            <img 
+              src="https://cdn.poehali.dev/projects/7d7646b6-3be9-4719-af6a-6713600b76e2/files/60a207b7-fe3a-4f6f-ad9a-e0209e288b32.jpg" 
+              alt="kedoo logo" 
+              className="w-10 h-10 rounded-xl object-cover" 
+            />
+            <span className="text-2xl font-bold gradient-text">kedoo</span>
           </div>
-
-          {/* Mobile Navigation */}
-          {mobileMenuOpen && (
-            <nav className="md:hidden flex flex-col gap-4 mt-4 pb-4">
-              <button
-                onClick={() => scrollToSection('features')}
-                className="text-left text-sm hover:text-primary transition-colors"
-              >
-                Возможности
-              </button>
-              <button
-                onClick={() => scrollToSection('about')}
-                className="text-left text-sm hover:text-primary transition-colors"
-              >
-                О платформе
-              </button>
-              <button
-                onClick={() => scrollToSection('contact')}
-                className="text-left text-sm hover:text-primary transition-colors"
-              >
-                Контакты
-              </button>
-              <Button onClick={() => {
-                setShowAuthDialog(true);
-                setMobileMenuOpen(false);
-              }} size="sm" className="w-full">
-                Войти
-              </Button>
-            </nav>
-          )}
-        </div>
-      </header>
-
-      {/* Hero Section */}
-      <section className="relative py-20 md:py-32 overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-br from-primary/10 via-transparent to-primary/5" />
-        <div className="container mx-auto px-4 relative">
-          <div className="max-w-4xl mx-auto text-center space-y-8">
-            <h2 className="text-4xl md:text-6xl font-bold">
-              <span className="bg-gradient-to-r from-primary via-primary/80 to-primary/60 bg-clip-text text-transparent">
-                Дистрибуция музыки
-              </span>
-              <br />
-              <span className="text-foreground">нового поколения</span>
-            </h2>
-            <p className="text-lg md:text-xl text-muted-foreground max-w-2xl mx-auto">
-              Публикуйте свою музыку на всех крупнейших стриминговых платформах мира. 
-              Простой интерфейс, быстрая модерация, прозрачная аналитика.
-            </p>
-            <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <Button size="lg" onClick={() => setShowAuthDialog(true)} className="text-lg px-8">
-                Начать бесплатно
-              </Button>
-              <Button size="lg" variant="outline" onClick={() => scrollToSection('features')} className="text-lg px-8">
-                Узнать больше
-              </Button>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Features Section */}
-      <section id="features" className="py-20 bg-muted/30">
-        <div className="container mx-auto px-4">
-          <div className="text-center mb-16">
-            <h3 className="text-3xl md:text-4xl font-bold mb-4">Возможности платформы</h3>
-            <p className="text-muted-foreground text-lg max-w-2xl mx-auto">
-              Все инструменты для успешной дистрибуции вашей музыки в одном месте
-            </p>
-          </div>
-
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
-            <Card className="hover:shadow-lg transition-shadow">
-              <CardHeader>
-                <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center mb-4">
-                  <Icon name="globe" className="w-6 h-6 text-primary" />
-                </div>
-                <CardTitle>Глобальная дистрибуция</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-muted-foreground">
-                  Распространяйте вашу музыку на Spotify, Apple Music, YouTube Music, Deezer и другие платформы
-                </p>
-              </CardContent>
-            </Card>
-
-            <Card className="hover:shadow-lg transition-shadow">
-              <CardHeader>
-                <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center mb-4">
-                  <Icon name="zap" className="w-6 h-6 text-primary" />
-                </div>
-                <CardTitle>Быстрая модерация</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-muted-foreground">
-                  Профессиональная проверка контента в течение 24 часов. Получайте обратную связь и рекомендации
-                </p>
-              </CardContent>
-            </Card>
-
-            <Card className="hover:shadow-lg transition-shadow">
-              <CardHeader>
-                <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center mb-4">
-                  <Icon name="bar-chart" className="w-6 h-6 text-primary" />
-                </div>
-                <CardTitle>Детальная аналитика</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-muted-foreground">
-                  Следите за статистикой прослушиваний, географией слушателей и доходами в реальном времени
-                </p>
-              </CardContent>
-            </Card>
-
-            <Card className="hover:shadow-lg transition-shadow">
-              <CardHeader>
-                <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center mb-4">
-                  <Icon name="shield" className="w-6 h-6 text-primary" />
-                </div>
-                <CardTitle>Защита прав</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-muted-foreground">
-                  Автоматическая регистрация авторских прав и защита вашей интеллектуальной собственности
-                </p>
-              </CardContent>
-            </Card>
-
-            <Card className="hover:shadow-lg transition-shadow">
-              <CardHeader>
-                <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center mb-4">
-                  <Icon name="dollar-sign" className="w-6 h-6 text-primary" />
-                </div>
-                <CardTitle>Прозрачные выплаты</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-muted-foreground">
-                  Никаких скрытых комиссий. Прозрачная система расчетов и своевременные выплаты роялти
-                </p>
-              </CardContent>
-            </Card>
-
-            <Card className="hover:shadow-lg transition-shadow">
-              <CardHeader>
-                <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center mb-4">
-                  <Icon name="headphones" className="w-6 h-6 text-primary" />
-                </div>
-                <CardTitle>24/7 Поддержка</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-muted-foreground">
-                  Наша команда всегда готова помочь вам с любыми вопросами по дистрибуции и продвижению
-                </p>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-      </section>
-
-      {/* About Section */}
-      <section id="about" className="py-20">
-        <div className="container mx-auto px-4">
-          <div className="max-w-4xl mx-auto">
-            <div className="text-center mb-12">
-              <h3 className="text-3xl md:text-4xl font-bold mb-4">О kedoo</h3>
-            </div>
-
-            <div className="grid md:grid-cols-2 gap-12 items-center">
-              <div className="space-y-6">
-                <p className="text-lg text-muted-foreground">
-                  kedoo - это современная платформа для дистрибуции музыки, созданная артистами для артистов. 
-                  Мы знаем, как важно для музыкантов сосредоточиться на творчестве, а не на технических аспектах публикации.
-                </p>
-                <p className="text-lg text-muted-foreground">
-                  Наша миссия - сделать процесс дистрибуции максимально простым и прозрачным, предоставляя при этом 
-                  профессиональные инструменты для управления вашей музыкальной карьерой.
-                </p>
-                <div className="space-y-4">
-                  <div className="flex items-start gap-3">
-                    <Icon name="check-circle" className="w-6 h-6 text-primary flex-shrink-0 mt-1" />
-                    <div>
-                      <h4 className="font-semibold mb-1">Без скрытых платежей</h4>
-                      <p className="text-sm text-muted-foreground">Вы платите только за то, что используете</p>
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-3">
-                    <Icon name="check-circle" className="w-6 h-6 text-primary flex-shrink-0 mt-1" />
-                    <div>
-                      <h4 className="font-semibold mb-1">100% ваших прав</h4>
-                      <p className="text-sm text-muted-foreground">Вы сохраняете все права на свою музыку</p>
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-3">
-                    <Icon name="check-circle" className="w-6 h-6 text-primary flex-shrink-0 mt-1" />
-                    <div>
-                      <h4 className="font-semibold mb-1">Неограниченные релизы</h4>
-                      <p className="text-sm text-muted-foreground">Публикуйте столько музыки, сколько хотите</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="relative">
-                <div className="aspect-square rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center">
-                  <Icon name="music" className="w-32 h-32 text-primary/40" />
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Contact Section */}
-      <section id="contact" className="py-20 bg-muted/30">
-        <div className="container mx-auto px-4">
-          <div className="max-w-2xl mx-auto text-center">
-            <h3 className="text-3xl md:text-4xl font-bold mb-4">Свяжитесь с нами</h3>
-            <p className="text-lg text-muted-foreground mb-8">
-              Есть вопросы? Наша команда всегда готова помочь
-            </p>
-
-            <div className="grid md:grid-cols-3 gap-6 mb-12">
-              <Card>
-                <CardContent className="pt-6 text-center">
-                  <Icon name="mail" className="w-8 h-8 mx-auto mb-3 text-primary" />
-                  <h4 className="font-semibold mb-2">Email</h4>
-                  <p className="text-sm text-muted-foreground">support@kedoo.ru</p>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardContent className="pt-6 text-center">
-                  <Icon name="phone" className="w-8 h-8 mx-auto mb-3 text-primary" />
-                  <h4 className="font-semibold mb-2">Телефон</h4>
-                  <p className="text-sm text-muted-foreground">+7 (495) 123-45-67</p>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardContent className="pt-6 text-center">
-                  <Icon name="message-circle" className="w-8 h-8 mx-auto mb-3 text-primary" />
-                  <h4 className="font-semibold mb-2">Поддержка</h4>
-                  <p className="text-sm text-muted-foreground">24/7 в личном кабинете</p>
-                </CardContent>
-              </Card>
-            </div>
-
-            <Button size="lg" onClick={() => setShowAuthDialog(true)}>
-              Начать работу
+          <div className="flex items-center gap-2">
+            <ThemeSelector theme={theme} onThemeChange={changeTheme} />
+            <Button
+              variant="ghost"
+              size="icon"
+              className="rounded-full"
+              onClick={() => setCurrentView('profile')}
+            >
+              <Icon name="User" size={20} />
+            </Button>
+            <Button variant="outline" onClick={() => { setCurrentUser(null); setCurrentView('landing'); }} className="hidden sm:flex">
+              <Icon name="LogOut" size={18} className="mr-2" />
+              Выйти
             </Button>
           </div>
         </div>
-      </section>
+      </nav>
 
-      {/* Footer */}
-      <footer className="border-t py-12 bg-card/50">
-        <div className="container mx-auto px-4">
-          <div className="grid md:grid-cols-4 gap-8 mb-8">
-            <div>
-              <div className="flex items-center gap-2 mb-4">
-                <Icon name="music" className="w-6 h-6 text-primary" />
-                <span className="font-bold text-lg">kedoo</span>
+      <div className="container mx-auto px-4 py-8">
+        {showReleaseForm ? (
+          <ReleaseForm
+            initialData={editingRelease}
+            onSave={handleSaveRelease}
+            onCancel={() => {
+              setShowReleaseForm(false);
+              setEditingRelease(null);
+            }}
+          />
+        ) : (
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+
+            <TabsContent value="releases" className="space-y-4">
+              <div className="flex flex-wrap gap-2 mb-4">
+                <Input
+                  placeholder="Поиск по названию..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="max-w-md"
+                />
+                <Select value={genreFilter} onValueChange={setGenreFilter}>
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue placeholder="Все жанры" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Все жанры</SelectItem>
+                    <SelectItem value="Pop">Pop</SelectItem>
+                    <SelectItem value="Rock">Rock</SelectItem>
+                    <SelectItem value="Hip-Hop">Hip-Hop</SelectItem>
+                    <SelectItem value="Electronic">Electronic</SelectItem>
+                    <SelectItem value="Jazz">Jazz</SelectItem>
+                    <SelectItem value="Classical">Classical</SelectItem>
+                    <SelectItem value="Other">Другое</SelectItem>
+                  </SelectContent>
+                </Select>
+                {searchQuery && (
+                  <Button variant="ghost" onClick={() => setSearchQuery('')}>
+                    <Icon name="X" size={18} />
+                  </Button>
+                )}
               </div>
-              <p className="text-sm text-muted-foreground">
-                Современная платформа для дистрибуции музыки
-              </p>
-            </div>
-
-            <div>
-              <h4 className="font-semibold mb-4">Платформа</h4>
-              <ul className="space-y-2 text-sm text-muted-foreground">
-                <li><button onClick={() => scrollToSection('features')} className="hover:text-primary transition-colors">Возможности</button></li>
-                <li><button onClick={() => scrollToSection('about')} className="hover:text-primary transition-colors">О нас</button></li>
-                <li><button onClick={() => setShowAuthDialog(true)} className="hover:text-primary transition-colors">Войти</button></li>
-              </ul>
-            </div>
-
-            <div>
-              <h4 className="font-semibold mb-4">Поддержка</h4>
-              <ul className="space-y-2 text-sm text-muted-foreground">
-                <li><button onClick={() => scrollToSection('contact')} className="hover:text-primary transition-colors">Контакты</button></li>
-                <li><a href="#" className="hover:text-primary transition-colors">FAQ</a></li>
-                <li><a href="#" className="hover:text-primary transition-colors">Документация</a></li>
-              </ul>
-            </div>
-
-            <div>
-              <h4 className="font-semibold mb-4">Юридическая информация</h4>
-              <ul className="space-y-2 text-sm text-muted-foreground">
-                <li><a href="#" className="hover:text-primary transition-colors">Условия использования</a></li>
-                <li><a href="#" className="hover:text-primary transition-colors">Политика конфиденциальности</a></li>
-                <li><a href="#" className="hover:text-primary transition-colors">Лицензионное соглашение</a></li>
-              </ul>
-            </div>
-          </div>
-
-          <div className="border-t pt-8 text-center text-sm text-muted-foreground">
-            <p>2025 kedoo. Все права защищены.</p>
-          </div>
-        </div>
-      </footer>
-
-      {/* Auth Dialog */}
-      <Dialog open={showAuthDialog} onOpenChange={setShowAuthDialog}>
-        <DialogContent className="sm:max-w-md">
-          <Tabs defaultValue="login">
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="login">Вход</TabsTrigger>
-              <TabsTrigger value="register">Регистрация</TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="login">
-              <form onSubmit={handleLogin} className="space-y-4">
-                <div>
-                  <Label htmlFor="login-email">Email</Label>
-                  <Input
-                    id="login-email"
-                    name="email"
-                    type="email"
-                    placeholder="you@example.com"
-                    required
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="login-password">Пароль</Label>
-                  <div className="relative">
-                    <Input
-                      id="login-password"
-                      name="password"
-                      type={showLoginPassword ? 'text' : 'password'}
-                      required
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="absolute right-0 top-0 h-full px-3"
-                      onClick={() => setShowLoginPassword(!showLoginPassword)}
-                    >
-                      <Icon name={showLoginPassword ? 'eye-off' : 'eye'} className="w-4 h-4" />
+              
+              {filteredUserReleases.length === 0 ? (
+                <Card>
+                  <CardContent className="py-12 text-center">
+                    <Icon name="Disc" size={48} className="mx-auto text-muted-foreground mb-4" />
+                    <h3 className="text-xl font-semibold mb-2">Релизов пока нет</h3>
+                    <p className="text-muted-foreground mb-6">Создайте свой первый релиз</p>
+                    <Button onClick={() => setActiveTab('add')} className="gradient-primary text-white">
+                      <Icon name="PlusCircle" size={18} className="mr-2" />
+                      Добавить релиз
                     </Button>
-                  </div>
-                </div>
-                <Button type="button" variant="link" className="px-0" onClick={() => {
-                  setShowAuthDialog(false);
-                  setShowResetForm(true);
-                }}>
-                  Забыли пароль?
-                </Button>
-                <Button type="submit" className="w-full">Войти</Button>
-              </form>
+                  </CardContent>
+                </Card>
+              ) : (
+                filteredUserReleases.map(release => (
+                  <Card key={release.id}>
+                    <CardHeader>
+                      <div className="flex items-start justify-between">
+                        <div className="flex gap-4">
+                          {release.cover_url && (
+                            <img src={release.cover_url} alt={release.title} className="w-20 h-20 rounded-lg object-cover" />
+                          )}
+                          <div>
+                            <CardTitle>{release.title}</CardTitle>
+                            <CardDescription>{release.genre}</CardDescription>
+                            <div className="mt-2">{getStatusBadge(release.status)}</div>
+                          </div>
+                        </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {release.rejection_reason && (
+                        <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-4">
+                          <p className="text-sm font-semibold mb-1">Причина отклонения:</p>
+                          <p className="text-sm">{release.rejection_reason}</p>
+                        </div>
+                      )}
+                      <div className="flex gap-2">
+                        <Button onClick={() => setViewDetailsRelease(release)} variant="outline">
+                          <Icon name="Eye" size={18} className="mr-2" />
+                          Детали
+                        </Button>
+                        {(release.status === 'draft' || release.status === 'rejected') && (
+                          <>
+                            <Button onClick={() => { 
+                              const tracks = mockDb.tracks.findByReleaseId(release.id);
+                              setEditingRelease({ ...release, tracks }); 
+                              setShowReleaseForm(true); 
+                            }} variant="outline">
+                              <Icon name="Edit" size={18} className="mr-2" />
+                              Редактировать
+                            </Button>
+                            <Button onClick={() => setDeleteDialog(release.id)} variant="outline">
+                              <Icon name="Trash2" size={18} className="mr-2" />
+                              Удалить
+                            </Button>
+                          </>
+                        )}
+                        {release.status === 'moderation' && (
+                          <>
+                            <Button onClick={() => { 
+                              const tracks = mockDb.tracks.findByReleaseId(release.id);
+                              setEditingRelease({ ...release, tracks }); 
+                              setShowReleaseForm(true); 
+                            }} variant="outline">
+                              <Icon name="Edit" size={18} className="mr-2" />
+                              Редактировать
+                            </Button>
+                            <Button onClick={() => handleRemoveFromModeration(release.id)} variant="outline">
+                              <Icon name="X" size={18} className="mr-2" />
+                              Снять с модерации
+                            </Button>
+                          </>
+                        )}
+                        {release.status === 'approved' && (
+                          <>
+                            <Button onClick={() => { 
+                              const tracks = mockDb.tracks.findByReleaseId(release.id);
+                              setEditingRelease({ ...release, tracks }); 
+                              setShowReleaseForm(true); 
+                            }} variant="outline">
+                              <Icon name="Edit" size={18} className="mr-2" />
+                              Редактировать
+                            </Button>
+                            <Button onClick={() => setDeleteDialog(release.id)} variant="outline">
+                              <Icon name="Trash2" size={18} className="mr-2" />
+                              Удалить
+                            </Button>
+                          </>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))
+              )}
             </TabsContent>
 
-            <TabsContent value="register">
-              <form onSubmit={handleRegister} className="space-y-4">
-                <div>
-                  <Label htmlFor="register-name">Имя</Label>
-                  <Input
-                    id="register-name"
-                    name="name"
-                    placeholder="Ваше имя"
-                    required
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="register-email">Email</Label>
-                  <Input
-                    id="register-email"
-                    name="email"
-                    type="email"
-                    placeholder="you@example.com"
-                    required
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="register-password">Пароль</Label>
-                  <div className="relative">
-                    <Input
-                      id="register-password"
-                      name="password"
-                      type={showRegisterPassword ? 'text' : 'password'}
-                      required
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="absolute right-0 top-0 h-full px-3"
-                      onClick={() => setShowRegisterPassword(!showRegisterPassword)}
-                    >
-                      <Icon name={showRegisterPassword ? 'eye-off' : 'eye'} className="w-4 h-4" />
-                    </Button>
+            <TabsContent value="trash" className="space-y-4">
+              {deletedReleases.length === 0 ? (
+                <Card>
+                  <CardContent className="py-12 text-center">
+                    <Icon name="Trash2" size={48} className="mx-auto text-muted-foreground mb-4" />
+                    <h3 className="text-xl font-semibold mb-2">Корзина пуста</h3>
+                    <p className="text-muted-foreground">Удалённые релизы появятся здесь</p>
+                  </CardContent>
+                </Card>
+              ) : (
+                deletedReleases.map(release => (
+                  <Card key={release.id}>
+                    <CardHeader>
+                      <div className="flex items-start justify-between">
+                        <div className="flex gap-4">
+                          {release.cover_url && (
+                            <img src={release.cover_url} alt={release.title} className="w-20 h-20 rounded-lg object-cover opacity-60" />
+                          )}
+                          <div>
+                            <CardTitle className="text-muted-foreground">{release.title}</CardTitle>
+                            <CardDescription>{release.genre}</CardDescription>
+                            <div className="mt-2">{getStatusBadge('deleted')}</div>
+                          </div>
+                        </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="flex gap-2">
+                        <Button onClick={() => setViewDetailsRelease(release)} variant="outline">
+                          <Icon name="Eye" size={18} className="mr-2" />
+                          Детали
+                        </Button>
+                        <Button onClick={() => handleRestoreRelease(release.id)} className="gradient-primary text-white">
+                          <Icon name="RotateCcw" size={18} className="mr-2" />
+                          Восстановить
+                        </Button>
+                        <Button onClick={() => setDeleteDialog(release.id)} variant="destructive">
+                          <Icon name="Trash" size={18} className="mr-2" />
+                          Удалить навсегда
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))
+              )}
+            </TabsContent>
+
+            <TabsContent value="tickets" className="space-y-4">
+              <div className="flex gap-2 mb-4">
+                {!showTicketForm && (
+                  <Button onClick={() => setShowTicketForm(true)} className="gradient-primary text-white">
+                    <Icon name="PlusCircle" size={18} className="mr-2" />
+                    Создать тикет
+                  </Button>
+                )}
+                <Select value={ticketFilter} onValueChange={(value: any) => setTicketFilter(value)}>
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue placeholder="Все тикеты" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Все тикеты</SelectItem>
+                    <SelectItem value="open">Открытые</SelectItem>
+                    <SelectItem value="answered">Отвеченные</SelectItem>
+                    <SelectItem value="closed">Закрытые</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {showTicketForm ? (
+                <TicketForm
+                  onSubmit={handleCreateTicket}
+                  onCancel={() => setShowTicketForm(false)}
+                />
+              ) : filteredUserTickets.length === 0 ? (
+                <Card>
+                  <CardContent className="py-12 text-center">
+                    <Icon name="MessageSquare" size={48} className="mx-auto text-muted-foreground mb-4" />
+                    <p className="text-muted-foreground">Тикетов пока нет</p>
+                  </CardContent>
+                </Card>
+              ) : (
+                filteredUserTickets.map(ticket => (
+                  <Card key={ticket.id}>
+                    <CardHeader>
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <CardTitle className="text-lg">{ticket.subject}</CardTitle>
+                          <CardDescription>{new Date(ticket.created_at).toLocaleDateString('ru-RU')}</CardDescription>
+                        </div>
+                        <Badge variant={ticket.status === 'closed' ? 'outline' : 'default'}>
+                          {ticket.status === 'open' ? 'Открыт' : ticket.status === 'answered' ? 'Отвечен' : 'Закрыт'}
+                        </Badge>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div>
+                        <p className="text-sm">{ticket.message}</p>
+                      </div>
+                      {ticket.admin_response && (
+                        <div className="bg-muted p-4 rounded-lg">
+                          <p className="text-sm font-semibold mb-1">Ответ модератора:</p>
+                          <p className="text-sm">{ticket.admin_response}</p>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                ))
+              )}
+            </TabsContent>
+
+            <TabsContent value="wallet">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Ваш кошелёк</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  <div className="text-center py-8">
+                    <div className="text-5xl font-bold gradient-text mb-2">{currentUser?.balance.toFixed(2)} ₽</div>
+                    <p className="text-muted-foreground">Доступно для вывода</p>
                   </div>
-                </div>
-                <Button type="submit" className="w-full">Зарегистрироваться</Button>
-              </form>
+                  <Button className="w-full" variant="outline" disabled>
+                    <Icon name="Download" size={18} className="mr-2" />
+                    Вывести средства
+                  </Button>
+                  <div className="pt-6 border-t">
+                    <h4 className="font-semibold mb-4">История транзакций</h4>
+                    <p className="text-muted-foreground text-center py-8">Транзакций пока нет</p>
+                  </div>
+                </CardContent>
+              </Card>
             </TabsContent>
           </Tabs>
-        </DialogContent>
-      </Dialog>
+        )}
+      </div>
 
-      {/* Reset Password Dialog */}
-      <Dialog open={showResetForm} onOpenChange={setShowResetForm}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Сброс пароля</DialogTitle>
-          </DialogHeader>
-          <form onSubmit={handleResetPassword} className="space-y-4">
-            <div>
-              <Label htmlFor="reset-email">Email</Label>
-              <Input
-                id="reset-email"
-                name="email"
-                type="email"
-                placeholder="you@example.com"
-                required
-              />
-            </div>
-            <div>
-              <Label htmlFor="reset-password">Новый пароль</Label>
-              <Input
-                id="reset-password"
-                name="new_password"
-                type="password"
-                required
-              />
-            </div>
-            <div className="flex gap-2">
-              <Button type="button" variant="outline" className="flex-1" onClick={() => setShowResetForm(false)}>
-                Отмена
-              </Button>
-              <Button type="submit" className="flex-1">Сбросить пароль</Button>
-            </div>
-          </form>
+      <AlertDialog open={!!deleteDialog} onOpenChange={() => setDeleteDialog(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Удалить релиз?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Вы сможете восстановить релиз позже из списка удалённых.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Отмена</AlertDialogCancel>
+            <AlertDialogAction onClick={() => deleteDialog && handleDeleteRelease(deleteDialog)}>
+              Удалить
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <Dialog open={!!viewDetailsRelease} onOpenChange={() => setViewDetailsRelease(null)}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          {viewDetailsRelease && (
+            <ReleaseDetails
+              release={viewDetailsRelease}
+              tracks={mockDb.tracks.findByReleaseId(viewDetailsRelease.id)}
+              onClose={() => setViewDetailsRelease(null)}
+              isAdmin={false}
+            />
+          )}
         </DialogContent>
       </Dialog>
     </div>
