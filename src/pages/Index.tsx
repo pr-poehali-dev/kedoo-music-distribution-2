@@ -341,9 +341,7 @@ const Index = () => {
               </div>
               <span className="text-2xl font-bold gradient-text">kedoo</span>
             </div>
-            <Button variant="ghost" size="icon" onClick={toggleTheme} className="rounded-full">
-              <Icon name={theme === 'light' ? 'Moon' : 'Sun'} size={20} />
-            </Button>
+            <ThemeSelector theme={theme} onThemeChange={changeTheme} />
           </div>
         </nav>
 
