@@ -30,6 +30,9 @@ const Index = () => {
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [adminResponse, setAdminResponse] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
+  const [showRegisterPassword, setShowRegisterPassword] = useState(false);
+  const [showResetForm, setShowResetForm] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -45,51 +48,115 @@ const Index = () => {
     document.documentElement.classList.toggle('dark', newTheme === 'dark');
   };
 
-  const handleLogin = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
     const email = formData.get('email') as string;
     const password = formData.get('password') as string;
 
-    const user = mockDb.users.findByEmail(email);
-    if (user && user.password === password) {
-      setCurrentUser(user);
-      setCurrentView('dashboard');
-      toast({
-        title: `Добро пожаловать, ${user.name}!`,
-        description: user.role === 'admin' ? 'Панель модератора' : 'Личный кабинет',
+    try {
+      const response = await fetch('https://functions.poehali.dev/9f5c445a-3808-4a16-9b62-149fec4c05bb', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'login', email, password })
       });
-    } else {
+      const data = await response.json();
+
+      if (data.success) {
+        setCurrentUser(data.user);
+        setCurrentView('dashboard');
+        toast({
+          title: `Добро пожаловать, ${data.user.name}!`,
+          description: data.user.role === 'admin' ? 'Панель модератора' : 'Личный кабинет',
+        });
+      } else {
+        toast({
+          title: "Ошибка входа",
+          description: data.error || "Неверный email или пароль",
+          variant: "destructive"
+        });
+      }
+    } catch (error) {
       toast({
-        title: "Ошибка входа",
-        description: "Неверный email или пароль",
+        title: "Ошибка",
+        description: "Не удалось выполнить вход",
         variant: "destructive"
       });
     }
   };
 
-  const handleRegister = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleRegister = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
     const email = formData.get('email') as string;
     const password = formData.get('password') as string;
     const name = formData.get('name') as string;
 
-    if (mockDb.users.findByEmail(email)) {
+    try {
+      const response = await fetch('https://functions.poehali.dev/9f5c445a-3808-4a16-9b62-149fec4c05bb', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'register', email, password, name, role: 'user' })
+      });
+      const data = await response.json();
+
+      if (data.success) {
+        setCurrentUser(data.user);
+        setCurrentView('dashboard');
+        toast({
+          title: "Регистрация успешна!",
+          description: "Добро пожаловать в kedoo!"
+        });
+      } else {
+        toast({
+          title: "Ошибка регистрации",
+          description: data.error || "Email уже занят",
+          variant: "destructive"
+        });
+      }
+    } catch (error) {
       toast({
-        title: "Email уже занят",
+        title: "Ошибка",
+        description: "Не удалось выполнить регистрацию",
         variant: "destructive"
       });
-      return;
     }
+  };
 
-    const user = mockDb.users.create({ email, password, name, role: 'user', balance: 0 });
-    setCurrentUser(user);
-    setCurrentView('dashboard');
-    toast({
-      title: "Регистрация успешна!",
-      description: "Добро пожаловать в kedoo!"
-    });
+  const handleResetPassword = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const formData = new FormData(e.currentTarget);
+    const email = formData.get('email') as string;
+    const new_password = formData.get('new_password') as string;
+
+    try {
+      const response = await fetch('https://functions.poehali.dev/9f5c445a-3808-4a16-9b62-149fec4c05bb', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'reset_password', email, new_password })
+      });
+      const data = await response.json();
+
+      if (data.success) {
+        setShowResetForm(false);
+        toast({
+          title: "Пароль обновлён",
+          description: "Теперь вы можете войти с новым паролем"
+        });
+      } else {
+        toast({
+          title: "Ошибка",
+          description: data.error || "Не удалось сбросить пароль",
+          variant: "destructive"
+        });
+      }
+    } catch (error) {
+      toast({
+        title: "Ошибка",
+        description: "Не удалось выполнить сброс пароля",
+        variant: "destructive"
+      });
+    }
   };
 
   const handleSaveRelease = (data: any) => {
@@ -323,8 +390,27 @@ const Index = () => {
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="login-password">Пароль</Label>
-                        <Input name="password" id="login-password" type="password" required />
+                        <div className="relative">
+                          <Input name="password" id="login-password" type={showLoginPassword ? "text" : "password"} required className="pr-10" />
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="absolute right-0 top-0 h-full"
+                            onClick={() => setShowLoginPassword(!showLoginPassword)}
+                          >
+                            <Icon name={showLoginPassword ? "EyeOff" : "Eye"} size={18} />
+                          </Button>
+                        </div>
                       </div>
+                      <Button
+                        type="button"
+                        variant="link"
+                        className="text-sm p-0 h-auto"
+                        onClick={() => setShowResetForm(true)}
+                      >
+                        Забыли пароль?
+                      </Button>
                       <Button type="submit" className="w-full gradient-primary text-white">
                         Войти
                       </Button>
@@ -343,7 +429,18 @@ const Index = () => {
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="register-password">Пароль</Label>
-                        <Input name="password" id="register-password" type="password" required />
+                        <div className="relative">
+                          <Input name="password" id="register-password" type={showRegisterPassword ? "text" : "password"} required className="pr-10" />
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="absolute right-0 top-0 h-full"
+                            onClick={() => setShowRegisterPassword(!showRegisterPassword)}
+                          >
+                            <Icon name={showRegisterPassword ? "EyeOff" : "Eye"} size={18} />
+                          </Button>
+                        </div>
                       </div>
                       <Button type="submit" className="w-full gradient-primary text-white">
                         Зарегистрироваться
@@ -355,6 +452,32 @@ const Index = () => {
             </Card>
           </div>
         </section>
+
+        <Dialog open={showResetForm} onOpenChange={setShowResetForm}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Восстановление пароля</DialogTitle>
+            </DialogHeader>
+            <form onSubmit={handleResetPassword} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="reset-email">Email</Label>
+                <Input name="email" id="reset-email" type="email" required />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="reset-password">Новый пароль</Label>
+                <Input name="new_password" id="reset-password" type="password" required />
+              </div>
+              <div className="flex gap-2 justify-end">
+                <Button type="button" variant="outline" onClick={() => setShowResetForm(false)}>
+                  Отмена
+                </Button>
+                <Button type="submit" className="gradient-primary text-white">
+                  Сбросить пароль
+                </Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
       </div>
     );
   }
