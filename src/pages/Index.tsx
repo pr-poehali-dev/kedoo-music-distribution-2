@@ -4,14 +4,29 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Badge } from '@/components/ui/badge';
+import { Textarea } from '@/components/ui/textarea';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import Icon from '@/components/ui/icon';
 import { useToast } from '@/hooks/use-toast';
+import { ReleaseForm } from '@/components/ReleaseForm';
+import { TicketForm } from '@/components/TicketForm';
+import { mockDb } from '@/lib/mockData';
+import type { User, Release, Ticket } from '@/lib/db';
 
 const Index = () => {
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [currentView, setCurrentView] = useState<'landing' | 'dashboard'>('landing');
   const [activeTab, setActiveTab] = useState('releases');
+  const [showReleaseForm, setShowReleaseForm] = useState(false);
+  const [showTicketForm, setShowTicketForm] = useState(false);
+  const [editingRelease, setEditingRelease] = useState<Release | null>(null);
+  const [selectedRelease, setSelectedRelease] = useState<Release | null>(null);
+  const [deleteDialog, setDeleteDialog] = useState<number | null>(null);
+  const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
+  const [adminResponse, setAdminResponse] = useState('');
   const { toast } = useToast();
 
   useEffect(() => {
@@ -27,27 +42,154 @@ const Index = () => {
     document.documentElement.classList.toggle('dark', newTheme === 'dark');
   };
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    setIsLoggedIn(true);
-    setCurrentView('dashboard');
-    toast({
-      title: "Добро пожаловать в kedoo!",
-      description: "Вы успешно вошли в систему",
-    });
+    const formData = new FormData(e.currentTarget);
+    const email = formData.get('email') as string;
+    const password = formData.get('password') as string;
+
+    const user = mockDb.users.findByEmail(email);
+    if (user && user.password === password) {
+      setCurrentUser(user);
+      setCurrentView('dashboard');
+      toast({
+        title: `Добро пожаловать, ${user.name}!`,
+        description: user.role === 'admin' ? 'Панель модератора' : 'Личный кабинет',
+      });
+    } else {
+      toast({
+        title: "Ошибка входа",
+        description: "Неверный email или пароль",
+        variant: "destructive"
+      });
+    }
   };
 
-  const handleRegister = (e: React.FormEvent) => {
+  const handleRegister = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    setIsLoggedIn(true);
+    const formData = new FormData(e.currentTarget);
+    const email = formData.get('email') as string;
+    const password = formData.get('password') as string;
+    const name = formData.get('name') as string;
+
+    if (mockDb.users.findByEmail(email)) {
+      toast({
+        title: "Email уже занят",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    const user = mockDb.users.create({ email, password, name, role: 'user', balance: 0 });
+    setCurrentUser(user);
     setCurrentView('dashboard');
     toast({
       title: "Регистрация успешна!",
-      description: "Ваш аккаунт создан. Добро пожаловать!",
+      description: "Добро пожаловать в kedoo!"
     });
   };
 
-  if (currentView === 'landing' && !isLoggedIn) {
+  const handleSaveRelease = (data: any) => {
+    if (editingRelease) {
+      mockDb.releases.update(editingRelease.id, data);
+      toast({ title: "Релиз обновлён" });
+    } else {
+      const release = mockDb.releases.create({
+        ...data,
+        user_id: currentUser!.id,
+        status: data.status || 'draft'
+      });
+
+      if (data.tracks) {
+        data.tracks.forEach((track: any, index: number) => {
+          mockDb.tracks.create({
+            ...track,
+            release_id: release.id,
+            track_order: index + 1
+          });
+        });
+      }
+
+      toast({
+        title: data.status === 'moderation' ? "Релиз отправлен на модерацию" : "Черновик сохранён"
+      });
+    }
+
+    setShowReleaseForm(false);
+    setEditingRelease(null);
+    if (data.status === 'moderation') {
+      setActiveTab('releases');
+    }
+  };
+
+  const handleDeleteRelease = (id: number) => {
+    mockDb.releases.delete(id);
+    setDeleteDialog(null);
+    toast({ title: "Релиз удалён" });
+  };
+
+  const handleRestoreRelease = (id: number) => {
+    mockDb.releases.update(id, { status: 'approved' });
+    toast({ title: "Релиз восстановлен" });
+  };
+
+  const handleApproveRelease = (id: number) => {
+    mockDb.releases.update(id, { status: 'approved', rejection_reason: undefined });
+    toast({ title: "Релиз принят" });
+  };
+
+  const handleRejectRelease = (id: number, reason: string) => {
+    mockDb.releases.update(id, { status: 'rejected', rejection_reason: reason });
+    setSelectedRelease(null);
+    toast({ title: "Релиз отклонён" });
+  };
+
+  const handleCreateTicket = (data: { subject: string; message: string }) => {
+    mockDb.tickets.create({
+      ...data,
+      user_id: currentUser!.id,
+      status: 'open'
+    });
+    setShowTicketForm(false);
+    toast({ title: "Тикет создан" });
+  };
+
+  const handleRespondToTicket = (ticketId: number) => {
+    if (adminResponse.trim()) {
+      mockDb.tickets.update(ticketId, {
+        status: 'answered',
+        admin_response: adminResponse
+      });
+      setSelectedTicket(null);
+      setAdminResponse('');
+      toast({ title: "Ответ отправлен" });
+    }
+  };
+
+  const handleCloseTicket = (ticketId: number) => {
+    mockDb.tickets.update(ticketId, { status: 'closed' });
+    setSelectedTicket(null);
+    toast({ title: "Тикет закрыт" });
+  };
+
+  const getStatusBadge = (status: string) => {
+    const variants: Record<string, any> = {
+      draft: { label: 'Черновик', variant: 'secondary' },
+      moderation: { label: 'На модерации', variant: 'default' },
+      approved: { label: 'Принят', variant: 'default' },
+      rejected: { label: 'Отклонён', variant: 'destructive' },
+      deleted: { label: 'Удалён', variant: 'outline' }
+    };
+    const config = variants[status] || variants.draft;
+    return <Badge variant={config.variant}>{config.label}</Badge>;
+  };
+
+  const userReleases = currentUser ? mockDb.releases.findByUserId(currentUser.id) : [];
+  const userTickets = currentUser ? mockDb.tickets.findByUserId(currentUser.id) : [];
+  const moderationReleases = mockDb.releases.findByStatus('moderation');
+  const allTickets = mockDb.tickets.findAll();
+
+  if (currentView === 'landing' && !currentUser) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-orange-50 dark:from-gray-900 dark:via-purple-900/20 dark:to-gray-900">
         <nav className="fixed top-0 left-0 right-0 z-50 glass border-b">
@@ -58,12 +200,7 @@ const Index = () => {
               </div>
               <span className="text-2xl font-bold gradient-text">kedoo</span>
             </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={toggleTheme}
-              className="rounded-full"
-            >
+            <Button variant="ghost" size="icon" onClick={toggleTheme} className="rounded-full">
               <Icon name={theme === 'light' ? 'Moon' : 'Sun'} size={20} />
             </Button>
           </div>
@@ -83,14 +220,6 @@ const Index = () => {
                 <p className="text-lg font-medium text-foreground">
                   Мы считаем, что выгрузка доступна всем и роялти тоже, поэтому не берём их.
                 </p>
-                <Button
-                  size="lg"
-                  className="gradient-primary text-white font-semibold text-lg px-8 py-6 hover:opacity-90 transition-opacity"
-                  onClick={() => setCurrentView('landing')}
-                >
-                  Начать сейчас
-                  <Icon name="ArrowRight" className="ml-2" size={20} />
-                </Button>
               </div>
               <div className="relative">
                 <img
@@ -130,42 +259,10 @@ const Index = () => {
           </div>
         </section>
 
-        <section className="py-20 px-4">
-          <div className="container mx-auto max-w-5xl">
-            <div className="grid lg:grid-cols-2 gap-12">
-              <div className="space-y-6">
-                <img
-                  src="https://cdn.poehali.dev/projects/7d7646b6-3be9-4719-af6a-6713600b76e2/files/b50b93c7-c7c9-4fcf-a050-3d892ada45bb.jpg"
-                  alt="Studio"
-                  className="rounded-2xl shadow-xl w-full"
-                />
-              </div>
-              <div className="space-y-6 flex flex-col justify-center">
-                <h2 className="text-4xl font-bold">Начните распространять свою музыку</h2>
-                <ul className="space-y-4">
-                  {[
-                    'Загрузите свои треки',
-                    'Автоматическая модерация',
-                    'Распространение на все площадки',
-                    '100% роялти вам',
-                  ].map((item, i) => (
-                    <li key={i} className="flex items-center gap-3">
-                      <div className="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center">
-                        <Icon name="Check" className="text-primary" size={16} />
-                      </div>
-                      <span className="text-lg">{item}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-          </div>
-        </section>
-
         <section className="py-20 px-4 bg-gradient-to-r from-purple-600 via-pink-600 to-orange-500">
           <div className="container mx-auto max-w-4xl text-center text-white space-y-6">
             <h2 className="text-4xl md:text-5xl font-bold">Готовы начать?</h2>
-            <p className="text-xl opacity-90">Присоединяйтесь к тысячам артистов, которые уже выбрали kedoo</p>
+            <p className="text-xl opacity-90">Присоединяйтесь к тысячам артистов</p>
             <Card className="max-w-md mx-auto mt-8">
               <CardHeader>
                 <CardTitle className="text-2xl">Вход / Регистрация</CardTitle>
@@ -181,11 +278,11 @@ const Index = () => {
                     <form onSubmit={handleLogin} className="space-y-4">
                       <div className="space-y-2">
                         <Label htmlFor="login-email">Email</Label>
-                        <Input id="login-email" type="email" required />
+                        <Input name="email" id="login-email" type="email" required />
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="login-password">Пароль</Label>
-                        <Input id="login-password" type="password" required />
+                        <Input name="password" id="login-password" type="password" required />
                       </div>
                       <Button type="submit" className="w-full gradient-primary text-white">
                         Войти
@@ -197,15 +294,15 @@ const Index = () => {
                     <form onSubmit={handleRegister} className="space-y-4">
                       <div className="space-y-2">
                         <Label htmlFor="register-name">Имя</Label>
-                        <Input id="register-name" required />
+                        <Input name="name" id="register-name" required />
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="register-email">Email</Label>
-                        <Input id="register-email" type="email" required />
+                        <Input name="email" id="register-email" type="email" required />
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="register-password">Пароль</Label>
-                        <Input id="register-password" type="password" required />
+                        <Input name="password" id="register-password" type="password" required />
                       </div>
                       <Button type="submit" className="w-full gradient-primary text-white">
                         Зарегистрироваться
@@ -217,12 +314,259 @@ const Index = () => {
             </Card>
           </div>
         </section>
+      </div>
+    );
+  }
 
-        <footer className="py-8 px-4 border-t">
-          <div className="container mx-auto text-center text-muted-foreground">
-            <p>© 2024 kedoo. Дочерняя компания Radish. Все права защищены.</p>
+  if (currentUser?.role === 'admin') {
+    return (
+      <div className="min-h-screen bg-background">
+        <nav className="border-b">
+          <div className="container mx-auto px-4 py-4 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="w-10 h-10 rounded-xl gradient-primary flex items-center justify-center">
+                <Icon name="Music" className="text-white" size={24} />
+              </div>
+              <span className="text-2xl font-bold gradient-text">kedoo</span>
+              <Badge variant="outline" className="ml-2">Модератор</Badge>
+            </div>
+            <div className="flex items-center gap-4">
+              <Button variant="ghost" size="icon" onClick={toggleTheme} className="rounded-full">
+                <Icon name={theme === 'light' ? 'Moon' : 'Sun'} size={20} />
+              </Button>
+              <Button variant="outline" onClick={() => { setCurrentUser(null); setCurrentView('landing'); }}>
+                <Icon name="LogOut" size={18} className="mr-2" />
+                Выйти
+              </Button>
+            </div>
           </div>
-        </footer>
+        </nav>
+
+        <div className="container mx-auto px-4 py-8">
+          <div className="mb-8">
+            <h1 className="text-3xl font-bold mb-2">Панель модератора</h1>
+            <p className="text-muted-foreground">Управление релизами и тикетами</p>
+          </div>
+
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+            <TabsList className="grid w-full max-w-md grid-cols-2">
+              <TabsTrigger value="moderation">
+                <Icon name="AlertCircle" size={18} className="mr-2" />
+                На модерации ({moderationReleases.length})
+              </TabsTrigger>
+              <TabsTrigger value="tickets">
+                <Icon name="MessageSquare" size={18} className="mr-2" />
+                Тикеты ({allTickets.filter(t => t.status !== 'closed').length})
+              </TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="moderation" className="space-y-4">
+              {moderationReleases.length === 0 ? (
+                <Card>
+                  <CardContent className="py-12 text-center">
+                    <Icon name="CheckCircle" size={48} className="mx-auto text-muted-foreground mb-4" />
+                    <p className="text-muted-foreground">Нет релизов на модерации</p>
+                  </CardContent>
+                </Card>
+              ) : (
+                moderationReleases.map(release => {
+                  const tracks = mockDb.tracks.findByReleaseId(release.id);
+                  const author = mockDb.users.findById(release.user_id);
+                  
+                  return (
+                    <Card key={release.id}>
+                      <CardHeader>
+                        <div className="flex items-start justify-between">
+                          <div className="flex gap-4">
+                            {release.cover_url && (
+                              <img src={release.cover_url} alt={release.title} className="w-20 h-20 rounded-lg object-cover" />
+                            )}
+                            <div>
+                              <CardTitle>{release.title}</CardTitle>
+                              <CardDescription>
+                                {release.genre} • {author?.name}
+                              </CardDescription>
+                              <div className="mt-2">
+                                {getStatusBadge(release.status)}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        <div className="grid grid-cols-2 gap-4 text-sm">
+                          {release.upc && <div><span className="text-muted-foreground">UPC:</span> {release.upc}</div>}
+                          <div><span className="text-muted-foreground">Дата релиза:</span> {release.new_release_date}</div>
+                          {release.old_release_date && (
+                            <div><span className="text-muted-foreground">Старая дата:</span> {release.old_release_date}</div>
+                          )}
+                          <div><span className="text-muted-foreground">Треков:</span> {tracks.length}</div>
+                        </div>
+
+                        <div>
+                          <h5 className="font-semibold mb-2">Треклист:</h5>
+                          <div className="space-y-2">
+                            {tracks.map((track, i) => (
+                              <div key={track.id} className="text-sm flex items-center gap-2">
+                                <span className="text-muted-foreground">{i + 1}.</span>
+                                <span>{track.title}</span>
+                                {track.has_explicit && <Badge variant="destructive" className="text-xs">E</Badge>}
+                                {track.audio_url && (
+                                  <a href={track.audio_url} download className="ml-auto">
+                                    <Button size="sm" variant="ghost">
+                                      <Icon name="Download" size={16} />
+                                    </Button>
+                                  </a>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="flex gap-2">
+                          <Button onClick={() => setSelectedRelease(release)} variant="outline">
+                            <Icon name="Eye" size={18} className="mr-2" />
+                            Детали
+                          </Button>
+                          {release.cover_url && (
+                            <a href={release.cover_url} download>
+                              <Button variant="outline">
+                                <Icon name="Download" size={18} className="mr-2" />
+                                Обложка
+                              </Button>
+                            </a>
+                          )}
+                          <Button onClick={() => handleApproveRelease(release.id)} className="gradient-primary text-white ml-auto">
+                            <Icon name="Check" size={18} className="mr-2" />
+                            Принять
+                          </Button>
+                          <Button onClick={() => setSelectedRelease(release)} variant="destructive">
+                            <Icon name="X" size={18} className="mr-2" />
+                            Отклонить
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })
+              )}
+            </TabsContent>
+
+            <TabsContent value="tickets" className="space-y-4">
+              {allTickets.length === 0 ? (
+                <Card>
+                  <CardContent className="py-12 text-center">
+                    <Icon name="Inbox" size={48} className="mx-auto text-muted-foreground mb-4" />
+                    <p className="text-muted-foreground">Нет тикетов</p>
+                  </CardContent>
+                </Card>
+              ) : (
+                allTickets.map(ticket => {
+                  const user = mockDb.users.findById(ticket.user_id);
+                  return (
+                    <Card key={ticket.id}>
+                      <CardHeader>
+                        <div className="flex items-start justify-between">
+                          <div>
+                            <CardTitle className="text-lg">{ticket.subject}</CardTitle>
+                            <CardDescription>{user?.name} • {new Date(ticket.created_at).toLocaleDateString('ru-RU')}</CardDescription>
+                          </div>
+                          <Badge variant={ticket.status === 'closed' ? 'outline' : 'default'}>
+                            {ticket.status === 'open' ? 'Открыт' : ticket.status === 'answered' ? 'Отвечен' : 'Закрыт'}
+                          </Badge>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        <div>
+                          <p className="text-sm">{ticket.message}</p>
+                        </div>
+                        {ticket.admin_response && (
+                          <div className="bg-muted p-4 rounded-lg">
+                            <p className="text-sm font-semibold mb-1">Ответ модератора:</p>
+                            <p className="text-sm">{ticket.admin_response}</p>
+                          </div>
+                        )}
+                        {ticket.status !== 'closed' && (
+                          <div className="flex gap-2">
+                            <Button onClick={() => setSelectedTicket(ticket)} variant="outline">
+                              <Icon name="Reply" size={18} className="mr-2" />
+                              Ответить
+                            </Button>
+                            <Button onClick={() => handleCloseTicket(ticket.id)} variant="outline">
+                              <Icon name="Check" size={18} className="mr-2" />
+                              Закрыть
+                            </Button>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  );
+                })
+              )}
+            </TabsContent>
+          </Tabs>
+        </div>
+
+        <Dialog open={!!selectedRelease} onOpenChange={() => setSelectedRelease(null)}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Отклонить релиз</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <Label>Причина отклонения</Label>
+              <Textarea
+                placeholder="Укажите причину отклонения..."
+                rows={4}
+                value={adminResponse}
+                onChange={(e) => setAdminResponse(e.target.value)}
+              />
+              <div className="flex gap-2 justify-end">
+                <Button onClick={() => setSelectedRelease(null)} variant="outline">
+                  Отмена
+                </Button>
+                <Button
+                  onClick={() => {
+                    if (adminResponse.trim() && selectedRelease) {
+                      handleRejectRelease(selectedRelease.id, adminResponse);
+                      setAdminResponse('');
+                    }
+                  }}
+                  variant="destructive"
+                >
+                  Отклонить релиз
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={!!selectedTicket} onOpenChange={() => setSelectedTicket(null)}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Ответить на тикет</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <Label>Ваш ответ</Label>
+              <Textarea
+                placeholder="Введите ответ..."
+                rows={4}
+                value={adminResponse}
+                onChange={(e) => setAdminResponse(e.target.value)}
+              />
+              <div className="flex gap-2 justify-end">
+                <Button onClick={() => setSelectedTicket(null)} variant="outline">
+                  Отмена
+                </Button>
+                <Button
+                  onClick={() => selectedTicket && handleRespondToTicket(selectedTicket.id)}
+                  className="gradient-primary text-white"
+                >
+                  Отправить ответ
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     );
   }
@@ -238,21 +582,10 @@ const Index = () => {
             <span className="text-2xl font-bold gradient-text">kedoo</span>
           </div>
           <div className="flex items-center gap-4">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={toggleTheme}
-              className="rounded-full"
-            >
+            <Button variant="ghost" size="icon" onClick={toggleTheme} className="rounded-full">
               <Icon name={theme === 'light' ? 'Moon' : 'Sun'} size={20} />
             </Button>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setIsLoggedIn(false);
-                setCurrentView('landing');
-              }}
-            >
+            <Button variant="outline" onClick={() => { setCurrentUser(null); setCurrentView('landing'); }}>
               <Icon name="LogOut" size={18} className="mr-2" />
               Выйти
             </Button>
@@ -263,104 +596,179 @@ const Index = () => {
       <div className="container mx-auto px-4 py-8">
         <div className="mb-8">
           <h1 className="text-3xl font-bold mb-2">Личный кабинет</h1>
-          <p className="text-muted-foreground">Управляйте своими релизами и отслеживайте статистику</p>
+          <p className="text-muted-foreground">Управляйте своими релизами</p>
         </div>
 
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full max-w-2xl grid-cols-4">
-            <TabsTrigger value="releases" className="flex items-center gap-2">
-              <Icon name="Disc" size={18} />
-              <span className="hidden sm:inline">Мои релизы</span>
-            </TabsTrigger>
-            <TabsTrigger value="add" className="flex items-center gap-2">
-              <Icon name="PlusCircle" size={18} />
-              <span className="hidden sm:inline">Добавить</span>
-            </TabsTrigger>
-            <TabsTrigger value="tickets" className="flex items-center gap-2">
-              <Icon name="MessageSquare" size={18} />
-              <span className="hidden sm:inline">Тикеты</span>
-            </TabsTrigger>
-            <TabsTrigger value="wallet" className="flex items-center gap-2">
-              <Icon name="Wallet" size={18} />
-              <span className="hidden sm:inline">Кошелёк</span>
-            </TabsTrigger>
-          </TabsList>
+        {showReleaseForm ? (
+          <ReleaseForm
+            initialData={editingRelease}
+            onSave={handleSaveRelease}
+            onCancel={() => {
+              setShowReleaseForm(false);
+              setEditingRelease(null);
+            }}
+          />
+        ) : (
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+            <TabsList className="grid w-full max-w-2xl grid-cols-4">
+              <TabsTrigger value="releases">
+                <Icon name="Disc" size={18} />
+                <span className="hidden sm:inline ml-2">Релизы</span>
+              </TabsTrigger>
+              <TabsTrigger value="add">
+                <Icon name="PlusCircle" size={18} />
+                <span className="hidden sm:inline ml-2">Добавить</span>
+              </TabsTrigger>
+              <TabsTrigger value="tickets">
+                <Icon name="MessageSquare" size={18} />
+                <span className="hidden sm:inline ml-2">Тикеты</span>
+              </TabsTrigger>
+              <TabsTrigger value="wallet">
+                <Icon name="Wallet" size={18} />
+                <span className="hidden sm:inline ml-2">Кошелёк</span>
+              </TabsTrigger>
+            </TabsList>
 
-          <TabsContent value="releases" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Все релизы</CardTitle>
-                <CardDescription>Здесь будут отображаться ваши релизы</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="flex flex-col items-center justify-center py-12 text-center">
-                  <div className="w-20 h-20 rounded-full bg-muted flex items-center justify-center mb-4">
-                    <Icon name="Disc" size={40} className="text-muted-foreground" />
-                  </div>
-                  <h3 className="text-xl font-semibold mb-2">Релизов пока нет</h3>
-                  <p className="text-muted-foreground mb-6">Создайте свой первый релиз, чтобы начать</p>
-                  <Button onClick={() => setActiveTab('add')} className="gradient-primary text-white">
-                    <Icon name="PlusCircle" size={18} className="mr-2" />
-                    Добавить релиз
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
+            <TabsContent value="releases" className="space-y-4">
+              {userReleases.length === 0 ? (
+                <Card>
+                  <CardContent className="py-12 text-center">
+                    <Icon name="Disc" size={48} className="mx-auto text-muted-foreground mb-4" />
+                    <h3 className="text-xl font-semibold mb-2">Релизов пока нет</h3>
+                    <p className="text-muted-foreground mb-6">Создайте свой первый релиз</p>
+                    <Button onClick={() => setActiveTab('add')} className="gradient-primary text-white">
+                      <Icon name="PlusCircle" size={18} className="mr-2" />
+                      Добавить релиз
+                    </Button>
+                  </CardContent>
+                </Card>
+              ) : (
+                userReleases.map(release => (
+                  <Card key={release.id}>
+                    <CardHeader>
+                      <div className="flex items-start justify-between">
+                        <div className="flex gap-4">
+                          {release.cover_url && (
+                            <img src={release.cover_url} alt={release.title} className="w-20 h-20 rounded-lg object-cover" />
+                          )}
+                          <div>
+                            <CardTitle>{release.title}</CardTitle>
+                            <CardDescription>{release.genre}</CardDescription>
+                            <div className="mt-2">{getStatusBadge(release.status)}</div>
+                          </div>
+                        </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {release.rejection_reason && (
+                        <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-4">
+                          <p className="text-sm font-semibold mb-1">Причина отклонения:</p>
+                          <p className="text-sm">{release.rejection_reason}</p>
+                        </div>
+                      )}
+                      <div className="flex gap-2">
+                        {(release.status === 'draft' || release.status === 'rejected') && (
+                          <>
+                            <Button onClick={() => { setEditingRelease(release); setShowReleaseForm(true); }} variant="outline">
+                              <Icon name="Edit" size={18} className="mr-2" />
+                              Редактировать
+                            </Button>
+                            <Button onClick={() => setDeleteDialog(release.id)} variant="outline">
+                              <Icon name="Trash2" size={18} className="mr-2" />
+                              Удалить
+                            </Button>
+                          </>
+                        )}
+                        {release.status === 'approved' && (
+                          <Button onClick={() => setDeleteDialog(release.id)} variant="outline">
+                            <Icon name="Trash2" size={18} className="mr-2" />
+                            Удалить
+                          </Button>
+                        )}
+                        {release.status === 'deleted' && (
+                          <Button onClick={() => handleRestoreRelease(release.id)} variant="outline">
+                            <Icon name="RotateCcw" size={18} className="mr-2" />
+                            Восстановить
+                          </Button>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))
+              )}
+            </TabsContent>
 
-          <TabsContent value="add" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Добавить новый релиз</CardTitle>
-                <CardDescription>Заполните информацию о вашем релизе</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="flex flex-col items-center justify-center py-12 text-center">
-                  <div className="w-20 h-20 rounded-full gradient-primary flex items-center justify-center mb-4">
-                    <Icon name="Upload" size={40} className="text-white" />
-                  </div>
-                  <h3 className="text-xl font-semibold mb-2">Создание релиза</h3>
-                  <p className="text-muted-foreground mb-6">Форма создания релиза появится здесь</p>
-                  <Button className="gradient-primary text-white">
+            <TabsContent value="add">
+              <Card>
+                <CardContent className="py-12 text-center">
+                  <Icon name="Upload" size={48} className="mx-auto gradient-text mb-4" />
+                  <h3 className="text-xl font-semibold mb-2">Создать новый релиз</h3>
+                  <p className="text-muted-foreground mb-6">Начните добавлять ваш новый альбом</p>
+                  <Button onClick={() => setShowReleaseForm(true)} className="gradient-primary text-white">
                     Начать создание
                   </Button>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
+                </CardContent>
+              </Card>
+            </TabsContent>
 
-          <TabsContent value="tickets" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Поддержка</CardTitle>
-                <CardDescription>Создавайте тикеты для связи с модераторами</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="flex flex-col items-center justify-center py-12 text-center">
-                  <div className="w-20 h-20 rounded-full bg-muted flex items-center justify-center mb-4">
-                    <Icon name="MessageSquare" size={40} className="text-muted-foreground" />
-                  </div>
-                  <h3 className="text-xl font-semibold mb-2">Тикетов пока нет</h3>
-                  <p className="text-muted-foreground mb-6">Создайте тикет, если у вас есть вопросы</p>
-                  <Button className="gradient-primary text-white">
-                    <Icon name="PlusCircle" size={18} className="mr-2" />
-                    Создать тикет
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
+            <TabsContent value="tickets" className="space-y-4">
+              {!showTicketForm && (
+                <Button onClick={() => setShowTicketForm(true)} className="gradient-primary text-white mb-4">
+                  <Icon name="PlusCircle" size={18} className="mr-2" />
+                  Создать тикет
+                </Button>
+              )}
 
-          <TabsContent value="wallet" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Ваш кошелёк</CardTitle>
-                <CardDescription>Управление финансами и вывод средств</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-6">
+              {showTicketForm ? (
+                <TicketForm
+                  onSubmit={handleCreateTicket}
+                  onCancel={() => setShowTicketForm(false)}
+                />
+              ) : userTickets.length === 0 ? (
+                <Card>
+                  <CardContent className="py-12 text-center">
+                    <Icon name="MessageSquare" size={48} className="mx-auto text-muted-foreground mb-4" />
+                    <p className="text-muted-foreground">Тикетов пока нет</p>
+                  </CardContent>
+                </Card>
+              ) : (
+                userTickets.map(ticket => (
+                  <Card key={ticket.id}>
+                    <CardHeader>
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <CardTitle className="text-lg">{ticket.subject}</CardTitle>
+                          <CardDescription>{new Date(ticket.created_at).toLocaleDateString('ru-RU')}</CardDescription>
+                        </div>
+                        <Badge variant={ticket.status === 'closed' ? 'outline' : 'default'}>
+                          {ticket.status === 'open' ? 'Открыт' : ticket.status === 'answered' ? 'Отвечен' : 'Закрыт'}
+                        </Badge>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div>
+                        <p className="text-sm">{ticket.message}</p>
+                      </div>
+                      {ticket.admin_response && (
+                        <div className="bg-muted p-4 rounded-lg">
+                          <p className="text-sm font-semibold mb-1">Ответ модератора:</p>
+                          <p className="text-sm">{ticket.admin_response}</p>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                ))
+              )}
+            </TabsContent>
+
+            <TabsContent value="wallet">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Ваш кошелёк</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-6">
                   <div className="text-center py-8">
-                    <div className="text-5xl font-bold gradient-text mb-2">0 ₽</div>
+                    <div className="text-5xl font-bold gradient-text mb-2">{currentUser?.balance.toFixed(2)} ₽</div>
                     <p className="text-muted-foreground">Доступно для вывода</p>
                   </div>
                   <Button className="w-full" variant="outline" disabled>
@@ -371,12 +779,29 @@ const Index = () => {
                     <h4 className="font-semibold mb-4">История транзакций</h4>
                     <p className="text-muted-foreground text-center py-8">Транзакций пока нет</p>
                   </div>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
+                </CardContent>
+              </Card>
+            </TabsContent>
+          </Tabs>
+        )}
       </div>
+
+      <AlertDialog open={!!deleteDialog} onOpenChange={() => setDeleteDialog(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Удалить релиз?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Вы сможете восстановить релиз позже из списка удалённых.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Отмена</AlertDialogCancel>
+            <AlertDialogAction onClick={() => deleteDialog && handleDeleteRelease(deleteDialog)}>
+              Удалить
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
