@@ -1,3 +1,5 @@
 {
-  "auth": "https://functions.poehali.dev/9f5c445a-3808-4a16-9b62-149fec4c05bb"
+  "auth": "https://functions.poehali.dev/9f5c445a-3808-4a16-9b62-149fec4c05bb",
+  "releases": "https://functions.poehali.dev/aab88ae6-4e32-4979-86e9-166b9afe10ef",
+  "tickets": "https://functions.poehali.dev/8554c9f5-b082-4425-86d5-70ceda845616"
 }
