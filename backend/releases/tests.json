@@ -1,0 +1,40 @@
+{
+  "tests": [
+    {
+      "name": "Get releases - no auth",
+      "method": "GET",
+      "path": "/",
+      "expectedStatus": 401,
+      "expectedBody": {
+        "error": "User ID required"
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Get releases - with auth",
+      "method": "GET",
+      "path": "/",
+      "headers": {
+        "X-User-Id": "1"
+      },
+      "expectedStatus": 200,
+      "expectedBody": {
+        "releases": "array"
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Get trash releases",
+      "method": "GET",
+      "path": "/?trash=true",
+      "headers": {
+        "X-User-Id": "1"
+      },
+      "expectedStatus": 200,
+      "expectedBody": {
+        "releases": "array"
+      },
+      "bodyMatcher": "partial"
+    }
+  ]
+}

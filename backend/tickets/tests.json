@@ -1,0 +1,27 @@
+{
+  "tests": [
+    {
+      "name": "Get tickets - no auth",
+      "method": "GET",
+      "path": "/",
+      "expectedStatus": 401,
+      "expectedBody": {
+        "error": "User ID required"
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Get tickets - with auth",
+      "method": "GET",
+      "path": "/",
+      "headers": {
+        "X-User-Id": "1"
+      },
+      "expectedStatus": 200,
+      "expectedBody": {
+        "tickets": "array"
+      },
+      "bodyMatcher": "partial"
+    }
+  ]
+}
