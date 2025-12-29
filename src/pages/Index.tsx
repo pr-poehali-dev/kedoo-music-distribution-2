@@ -790,6 +790,10 @@ const Index = () => {
             </div>
 
             <div className="hidden md:flex items-center gap-4">
+              <Button onClick={() => setShowReleaseForm(true)} size="sm" className="gap-2">
+                <Icon name="plus" className="w-4 h-4" />
+                Добавить релиз
+              </Button>
               <ThemeSelector theme={theme} onThemeChange={changeTheme} />
               <Button
                 variant="ghost"
@@ -813,6 +817,16 @@ const Index = () => {
               </SheetTrigger>
               <SheetContent>
                 <div className="flex flex-col gap-4 mt-8">
+                  <Button
+                    onClick={() => {
+                      setShowReleaseForm(true);
+                      setShowMobileMenu(false);
+                    }}
+                    className="justify-start"
+                  >
+                    <Icon name="plus" className="w-4 h-4 mr-2" />
+                    Добавить релиз
+                  </Button>
                   <ThemeSelector theme={theme} onThemeChange={changeTheme} />
                   <Button
                     variant="ghost"
