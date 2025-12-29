@@ -43,8 +43,10 @@ export const mockDb = {
   releases: {
     findAll: () => releases,
     findByUserId: (userId: number) => releases.filter(r => r.user_id === userId && r.status !== 'deleted'),
+    findDeletedByUserId: (userId: number) => releases.filter(r => r.user_id === userId && r.status === 'deleted'),
     findByStatus: (status: string) => releases.filter(r => r.status === status),
     findById: (id: number) => releases.find(r => r.id === id),
+    search: (query: string) => releases.filter(r => r.title.toLowerCase().includes(query.toLowerCase())),
     create: (data: Omit<Release, 'id' | 'created_at' | 'updated_at'>) => {
       const release: Release = {
         ...data,
@@ -70,8 +72,13 @@ export const mockDb = {
     delete: (id: number) => {
       const index = releases.findIndex(r => r.id === id);
       if (index !== -1) {
-        releases[index].status = 'deleted';
-        releases[index].updated_at = new Date().toISOString();
+        const oldStatus = releases[index].status;
+        releases[index] = {
+          ...releases[index],
+          status: 'deleted',
+          rejection_reason: oldStatus === 'deleted' ? releases[index].rejection_reason : `_prev_status:${oldStatus}`,
+          updated_at: new Date().toISOString()
+        };
         return true;
       }
       return false;

@@ -12,6 +12,7 @@ import Icon from '@/components/ui/icon';
 import { useToast } from '@/hooks/use-toast';
 import { ReleaseForm } from '@/components/ReleaseForm';
 import { TicketForm } from '@/components/TicketForm';
+import { ReleaseDetails } from '@/components/ReleaseDetails';
 import { mockDb } from '@/lib/mockData';
 import type { User, Release, Ticket } from '@/lib/db';
 
@@ -24,9 +25,11 @@ const Index = () => {
   const [showTicketForm, setShowTicketForm] = useState(false);
   const [editingRelease, setEditingRelease] = useState<Release | null>(null);
   const [selectedRelease, setSelectedRelease] = useState<Release | null>(null);
+  const [viewDetailsRelease, setViewDetailsRelease] = useState<Release | null>(null);
   const [deleteDialog, setDeleteDialog] = useState<number | null>(null);
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [adminResponse, setAdminResponse] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
   const { toast } = useToast();
 
   useEffect(() => {
@@ -91,7 +94,21 @@ const Index = () => {
 
   const handleSaveRelease = (data: any) => {
     if (editingRelease) {
-      mockDb.releases.update(editingRelease.id, data);
+      const updateData = { ...data };
+      if (data.status === 'moderation') {
+        updateData.rejection_reason = undefined;
+      }
+      mockDb.releases.update(editingRelease.id, updateData);
+      mockDb.tracks.deleteByReleaseId(editingRelease.id);
+      if (data.tracks) {
+        data.tracks.forEach((track: any, index: number) => {
+          mockDb.tracks.create({
+            ...track,
+            release_id: editingRelease.id,
+            track_order: index + 1
+          });
+        });
+      }
       toast({ title: "Релиз обновлён" });
     } else {
       const release = mockDb.releases.create({
@@ -129,8 +146,23 @@ const Index = () => {
   };
 
   const handleRestoreRelease = (id: number) => {
-    mockDb.releases.update(id, { status: 'approved' });
-    toast({ title: "Релиз восстановлен" });
+    const release = mockDb.releases.findById(id);
+    if (release && release.rejection_reason?.startsWith('_prev_status:')) {
+      const prevStatus = release.rejection_reason.replace('_prev_status:', '') as any;
+      mockDb.releases.update(id, { 
+        status: prevStatus,
+        rejection_reason: undefined
+      });
+      toast({ title: "Релиз восстановлен" });
+    } else if (release) {
+      mockDb.releases.update(id, { status: 'approved', rejection_reason: undefined });
+      toast({ title: "Релиз восстановлен" });
+    }
+  };
+
+  const handleRemoveFromModeration = (id: number) => {
+    mockDb.releases.update(id, { status: 'draft' });
+    toast({ title: "Релиз снят с модерации" });
   };
 
   const handleApproveRelease = (id: number) => {
@@ -185,9 +217,18 @@ const Index = () => {
   };
 
   const userReleases = currentUser ? mockDb.releases.findByUserId(currentUser.id) : [];
+  const deletedReleases = currentUser ? mockDb.releases.findDeletedByUserId(currentUser.id) : [];
   const userTickets = currentUser ? mockDb.tickets.findByUserId(currentUser.id) : [];
   const moderationReleases = mockDb.releases.findByStatus('moderation');
   const allTickets = mockDb.tickets.findAll();
+  
+  const filteredUserReleases = searchQuery 
+    ? userReleases.filter(r => r.title.toLowerCase().includes(searchQuery.toLowerCase()))
+    : userReleases;
+  
+  const filteredModerationReleases = searchQuery
+    ? moderationReleases.filter(r => r.title.toLowerCase().includes(searchQuery.toLowerCase()))
+    : moderationReleases;
 
   if (currentView === 'landing' && !currentUser) {
     return (
@@ -361,7 +402,21 @@ const Index = () => {
             </TabsList>
 
             <TabsContent value="moderation" className="space-y-4">
-              {moderationReleases.length === 0 ? (
+              <div className="flex gap-2 mb-4">
+                <Input
+                  placeholder="Поиск по названию..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="max-w-md"
+                />
+                {searchQuery && (
+                  <Button variant="ghost" onClick={() => setSearchQuery('')}>
+                    <Icon name="X" size={18} />
+                  </Button>
+                )}
+              </div>
+              
+              {filteredModerationReleases.length === 0 ? (
                 <Card>
                   <CardContent className="py-12 text-center">
                     <Icon name="CheckCircle" size={48} className="mx-auto text-muted-foreground mb-4" />
@@ -369,7 +424,7 @@ const Index = () => {
                   </CardContent>
                 </Card>
               ) : (
-                moderationReleases.map(release => {
+                filteredModerationReleases.map(release => {
                   const tracks = mockDb.tracks.findByReleaseId(release.id);
                   const author = mockDb.users.findById(release.user_id);
                   
@@ -424,7 +479,7 @@ const Index = () => {
                         </div>
 
                         <div className="flex gap-2">
-                          <Button onClick={() => setSelectedRelease(release)} variant="outline">
+                          <Button onClick={() => setViewDetailsRelease(release)} variant="outline">
                             <Icon name="Eye" size={18} className="mr-2" />
                             Детали
                           </Button>
@@ -567,6 +622,19 @@ const Index = () => {
             </div>
           </DialogContent>
         </Dialog>
+
+        <Dialog open={!!viewDetailsRelease} onOpenChange={() => setViewDetailsRelease(null)}>
+          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+            {viewDetailsRelease && (
+              <ReleaseDetails
+                release={viewDetailsRelease}
+                tracks={mockDb.tracks.findByReleaseId(viewDetailsRelease.id)}
+                onClose={() => setViewDetailsRelease(null)}
+                isAdmin={true}
+              />
+            )}
+          </DialogContent>
+        </Dialog>
       </div>
     );
   }
@@ -610,10 +678,14 @@ const Index = () => {
           />
         ) : (
           <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-            <TabsList className="grid w-full max-w-2xl grid-cols-4">
+            <TabsList className="grid w-full max-w-3xl grid-cols-5">
               <TabsTrigger value="releases">
                 <Icon name="Disc" size={18} />
                 <span className="hidden sm:inline ml-2">Релизы</span>
+              </TabsTrigger>
+              <TabsTrigger value="trash">
+                <Icon name="Trash2" size={18} />
+                <span className="hidden sm:inline ml-2">Корзина</span>
               </TabsTrigger>
               <TabsTrigger value="add">
                 <Icon name="PlusCircle" size={18} />
@@ -630,7 +702,21 @@ const Index = () => {
             </TabsList>
 
             <TabsContent value="releases" className="space-y-4">
-              {userReleases.length === 0 ? (
+              <div className="flex gap-2 mb-4">
+                <Input
+                  placeholder="Поиск по названию..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="max-w-md"
+                />
+                {searchQuery && (
+                  <Button variant="ghost" onClick={() => setSearchQuery('')}>
+                    <Icon name="X" size={18} />
+                  </Button>
+                )}
+              </div>
+              
+              {filteredUserReleases.length === 0 ? (
                 <Card>
                   <CardContent className="py-12 text-center">
                     <Icon name="Disc" size={48} className="mx-auto text-muted-foreground mb-4" />
@@ -643,7 +729,7 @@ const Index = () => {
                   </CardContent>
                 </Card>
               ) : (
-                userReleases.map(release => (
+                filteredUserReleases.map(release => (
                   <Card key={release.id}>
                     <CardHeader>
                       <div className="flex items-start justify-between">
@@ -667,9 +753,17 @@ const Index = () => {
                         </div>
                       )}
                       <div className="flex gap-2">
+                        <Button onClick={() => setViewDetailsRelease(release)} variant="outline">
+                          <Icon name="Eye" size={18} className="mr-2" />
+                          Детали
+                        </Button>
                         {(release.status === 'draft' || release.status === 'rejected') && (
                           <>
-                            <Button onClick={() => { setEditingRelease(release); setShowReleaseForm(true); }} variant="outline">
+                            <Button onClick={() => { 
+                              const tracks = mockDb.tracks.findByReleaseId(release.id);
+                              setEditingRelease({ ...release, tracks }); 
+                              setShowReleaseForm(true); 
+                            }} variant="outline">
                               <Icon name="Edit" size={18} className="mr-2" />
                               Редактировать
                             </Button>
@@ -679,18 +773,81 @@ const Index = () => {
                             </Button>
                           </>
                         )}
+                        {release.status === 'moderation' && (
+                          <>
+                            <Button onClick={() => { 
+                              const tracks = mockDb.tracks.findByReleaseId(release.id);
+                              setEditingRelease({ ...release, tracks }); 
+                              setShowReleaseForm(true); 
+                            }} variant="outline">
+                              <Icon name="Edit" size={18} className="mr-2" />
+                              Редактировать
+                            </Button>
+                            <Button onClick={() => handleRemoveFromModeration(release.id)} variant="outline">
+                              <Icon name="X" size={18} className="mr-2" />
+                              Снять с модерации
+                            </Button>
+                          </>
+                        )}
                         {release.status === 'approved' && (
-                          <Button onClick={() => setDeleteDialog(release.id)} variant="outline">
-                            <Icon name="Trash2" size={18} className="mr-2" />
-                            Удалить
-                          </Button>
+                          <>
+                            <Button onClick={() => { 
+                              const tracks = mockDb.tracks.findByReleaseId(release.id);
+                              setEditingRelease({ ...release, tracks }); 
+                              setShowReleaseForm(true); 
+                            }} variant="outline">
+                              <Icon name="Edit" size={18} className="mr-2" />
+                              Редактировать
+                            </Button>
+                            <Button onClick={() => setDeleteDialog(release.id)} variant="outline">
+                              <Icon name="Trash2" size={18} className="mr-2" />
+                              Удалить
+                            </Button>
+                          </>
                         )}
-                        {release.status === 'deleted' && (
-                          <Button onClick={() => handleRestoreRelease(release.id)} variant="outline">
-                            <Icon name="RotateCcw" size={18} className="mr-2" />
-                            Восстановить
-                          </Button>
-                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))
+              )}
+            </TabsContent>
+
+            <TabsContent value="trash" className="space-y-4">
+              {deletedReleases.length === 0 ? (
+                <Card>
+                  <CardContent className="py-12 text-center">
+                    <Icon name="Trash2" size={48} className="mx-auto text-muted-foreground mb-4" />
+                    <h3 className="text-xl font-semibold mb-2">Корзина пуста</h3>
+                    <p className="text-muted-foreground">Удалённые релизы появятся здесь</p>
+                  </CardContent>
+                </Card>
+              ) : (
+                deletedReleases.map(release => (
+                  <Card key={release.id}>
+                    <CardHeader>
+                      <div className="flex items-start justify-between">
+                        <div className="flex gap-4">
+                          {release.cover_url && (
+                            <img src={release.cover_url} alt={release.title} className="w-20 h-20 rounded-lg object-cover opacity-60" />
+                          )}
+                          <div>
+                            <CardTitle className="text-muted-foreground">{release.title}</CardTitle>
+                            <CardDescription>{release.genre}</CardDescription>
+                            <div className="mt-2">{getStatusBadge('deleted')}</div>
+                          </div>
+                        </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="flex gap-2">
+                        <Button onClick={() => setViewDetailsRelease(release)} variant="outline">
+                          <Icon name="Eye" size={18} className="mr-2" />
+                          Детали
+                        </Button>
+                        <Button onClick={() => handleRestoreRelease(release.id)} className="gradient-primary text-white">
+                          <Icon name="RotateCcw" size={18} className="mr-2" />
+                          Восстановить
+                        </Button>
                       </div>
                     </CardContent>
                   </Card>
@@ -802,6 +959,19 @@ const Index = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog open={!!viewDetailsRelease} onOpenChange={() => setViewDetailsRelease(null)}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          {viewDetailsRelease && (
+            <ReleaseDetails
+              release={viewDetailsRelease}
+              tracks={mockDb.tracks.findByReleaseId(viewDetailsRelease.id)}
+              onClose={() => setViewDetailsRelease(null)}
+              isAdmin={false}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
