@@ -336,9 +336,11 @@ const Index = () => {
         <nav className="fixed top-0 left-0 right-0 z-50 glass border-b">
           <div className="container mx-auto px-4 py-4 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <div className="w-10 h-10 rounded-xl gradient-primary flex items-center justify-center">
-                <Icon name="Music" className="text-white" size={24} />
-              </div>
+              <img 
+                src="https://cdn.poehali.dev/projects/7d7646b6-3be9-4719-af6a-6713600b76e2/files/60a207b7-fe3a-4f6f-ad9a-e0209e288b32.jpg" 
+                alt="kedoo logo" 
+                className="w-10 h-10 rounded-xl object-cover" 
+              />
               <span className="text-2xl font-bold gradient-text">kedoo</span>
             </div>
             <ThemeSelector theme={theme} onThemeChange={changeTheme} />
@@ -523,9 +525,11 @@ const Index = () => {
         <nav className="border-b">
           <div className="container mx-auto px-4 py-4 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <div className="w-10 h-10 rounded-xl gradient-primary flex items-center justify-center">
-                <Icon name="Music" className="text-white" size={24} />
-              </div>
+              <img 
+                src="https://cdn.poehali.dev/projects/7d7646b6-3be9-4719-af6a-6713600b76e2/files/60a207b7-fe3a-4f6f-ad9a-e0209e288b32.jpg" 
+                alt="kedoo logo" 
+                className="w-10 h-10 rounded-xl object-cover" 
+              />
               <span className="text-2xl font-bold gradient-text">kedoo</span>
               <Badge variant="outline" className="ml-2">Модератор</Badge>
             </div>
@@ -838,7 +842,7 @@ const Index = () => {
           <div className="flex items-center gap-2">
             <Sheet>
               <SheetTrigger asChild>
-                <Button variant="ghost" size="icon" className="md:hidden">
+                <Button variant="ghost" size="icon">
                   <Icon name="Menu" size={24} />
                 </Button>
               </SheetTrigger>
@@ -853,17 +857,9 @@ const Index = () => {
                     Релизы
                   </Button>
                   <Button
-                    variant={activeTab === 'trash' ? 'default' : 'ghost'}
-                    className="justify-start"
-                    onClick={() => { setActiveTab('trash'); setShowReleaseForm(false); }}
-                  >
-                    <Icon name="Trash2" size={18} className="mr-2" />
-                    Корзина
-                  </Button>
-                  <Button
                     variant={showReleaseForm ? 'default' : 'ghost'}
                     className="justify-start"
-                    onClick={() => { setShowReleaseForm(true); setEditingRelease(null); }}
+                    onClick={() => { setShowReleaseForm(true); setEditingRelease(null); setActiveTab('releases'); }}
                   >
                     <Icon name="PlusCircle" size={18} className="mr-2" />
                     Добавить релиз
@@ -877,6 +873,14 @@ const Index = () => {
                     Тикеты
                   </Button>
                   <Button
+                    variant={activeTab === 'trash' ? 'default' : 'ghost'}
+                    className="justify-start"
+                    onClick={() => { setActiveTab('trash'); setShowReleaseForm(false); }}
+                  >
+                    <Icon name="Trash2" size={18} className="mr-2" />
+                    Корзина
+                  </Button>
+                  <Button
                     variant={activeTab === 'wallet' ? 'default' : 'ghost'}
                     className="justify-start"
                     onClick={() => { setActiveTab('wallet'); setShowReleaseForm(false); }}
@@ -884,12 +888,23 @@ const Index = () => {
                     <Icon name="Wallet" size={18} className="mr-2" />
                     Кошелёк
                   </Button>
+                  <div className="border-t my-4"></div>
+                  <Button
+                    variant="outline"
+                    className="justify-start"
+                    onClick={() => { setCurrentUser(null); setCurrentView('landing'); }}
+                  >
+                    <Icon name="LogOut" size={18} className="mr-2" />
+                    Выйти
+                  </Button>
                 </div>
               </SheetContent>
             </Sheet>
-            <div className="w-10 h-10 rounded-xl gradient-primary flex items-center justify-center">
-              <Icon name="Music" className="text-white" size={24} />
-            </div>
+            <img 
+              src="https://cdn.poehali.dev/projects/7d7646b6-3be9-4719-af6a-6713600b76e2/files/60a207b7-fe3a-4f6f-ad9a-e0209e288b32.jpg" 
+              alt="kedoo logo" 
+              className="w-10 h-10 rounded-xl object-cover" 
+            />
             <span className="text-2xl font-bold gradient-text">kedoo</span>
           </div>
           <div className="flex items-center gap-2">
@@ -922,28 +937,6 @@ const Index = () => {
           />
         ) : (
           <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-            <TabsList className="grid w-full max-w-3xl grid-cols-5">
-              <TabsTrigger value="releases">
-                <Icon name="Disc" size={18} />
-                <span className="hidden sm:inline ml-2">Релизы</span>
-              </TabsTrigger>
-              <TabsTrigger value="trash">
-                <Icon name="Trash2" size={18} />
-                <span className="hidden sm:inline ml-2">Корзина</span>
-              </TabsTrigger>
-              <TabsTrigger value="add">
-                <Icon name="PlusCircle" size={18} />
-                <span className="hidden sm:inline ml-2">Добавить</span>
-              </TabsTrigger>
-              <TabsTrigger value="tickets">
-                <Icon name="MessageSquare" size={18} />
-                <span className="hidden sm:inline ml-2">Тикеты</span>
-              </TabsTrigger>
-              <TabsTrigger value="wallet">
-                <Icon name="Wallet" size={18} />
-                <span className="hidden sm:inline ml-2">Кошелёк</span>
-              </TabsTrigger>
-            </TabsList>
 
             <TabsContent value="releases" className="space-y-4">
               <div className="flex flex-wrap gap-2 mb-4">
@@ -1116,19 +1109,6 @@ const Index = () => {
                   </Card>
                 ))
               )}
-            </TabsContent>
-
-            <TabsContent value="add">
-              <Card>
-                <CardContent className="py-12 text-center">
-                  <Icon name="Upload" size={48} className="mx-auto gradient-text mb-4" />
-                  <h3 className="text-xl font-semibold mb-2">Создать новый релиз</h3>
-                  <p className="text-muted-foreground mb-6">Начните добавлять ваш новый альбом</p>
-                  <Button onClick={() => setShowReleaseForm(true)} className="gradient-primary text-white">
-                    Начать создание
-                  </Button>
-                </CardContent>
-              </Card>
             </TabsContent>
 
             <TabsContent value="tickets" className="space-y-4">
