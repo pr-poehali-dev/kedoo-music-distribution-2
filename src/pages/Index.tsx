@@ -13,13 +13,17 @@ import { useToast } from '@/hooks/use-toast';
 import { ReleaseForm } from '@/components/ReleaseForm';
 import { TicketForm } from '@/components/TicketForm';
 import { ReleaseDetails } from '@/components/ReleaseDetails';
+import { ThemeSelector } from '@/components/ThemeSelector';
+import { ProfilePage } from '@/components/ProfilePage';
+import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { mockDb } from '@/lib/mockData';
 import type { User, Release, Ticket } from '@/lib/db';
 
 const Index = () => {
-  const [theme, setTheme] = useState<'light' | 'dark'>('light');
+  const [theme, setTheme] = useState<'light' | 'dark' | 'crystal' | 'blue-dark'>('light');
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [currentView, setCurrentView] = useState<'landing' | 'dashboard'>('landing');
+  const [currentView, setCurrentView] = useState<'landing' | 'dashboard' | 'profile'>('landing');
   const [activeTab, setActiveTab] = useState('releases');
   const [showReleaseForm, setShowReleaseForm] = useState(false);
   const [showTicketForm, setShowTicketForm] = useState(false);
@@ -30,22 +34,30 @@ const Index = () => {
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [adminResponse, setAdminResponse] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [genreFilter, setGenreFilter] = useState<string>('all');
+  const [ticketFilter, setTicketFilter] = useState<'all' | 'open' | 'answered' | 'closed'>('all');
   const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [showRegisterPassword, setShowRegisterPassword] = useState(false);
   const [showResetForm, setShowResetForm] = useState(false);
+  const [showMobileMenu, setShowMobileMenu] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
-    const savedTheme = localStorage.getItem('theme') as 'light' | 'dark' || 'light';
+    const savedTheme = localStorage.getItem('theme') as 'light' | 'dark' | 'crystal' | 'blue-dark' || 'light';
     setTheme(savedTheme);
-    document.documentElement.classList.toggle('dark', savedTheme === 'dark');
+    document.documentElement.classList.remove('dark', 'crystal', 'blue-dark');
+    if (savedTheme !== 'light') {
+      document.documentElement.classList.add(savedTheme);
+    }
   }, []);
 
-  const toggleTheme = () => {
-    const newTheme = theme === 'light' ? 'dark' : 'light';
+  const changeTheme = (newTheme: 'light' | 'dark' | 'crystal' | 'blue-dark') => {
     setTheme(newTheme);
     localStorage.setItem('theme', newTheme);
-    document.documentElement.classList.toggle('dark', newTheme === 'dark');
+    document.documentElement.classList.remove('dark', 'crystal', 'blue-dark');
+    if (newTheme !== 'light') {
+      document.documentElement.classList.add(newTheme);
+    }
   };
 
   const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -207,9 +219,16 @@ const Index = () => {
   };
 
   const handleDeleteRelease = (id: number) => {
-    mockDb.releases.delete(id);
-    setDeleteDialog(null);
-    toast({ title: "Релиз удалён" });
+    const release = mockDb.releases.findById(id);
+    if (release?.status === 'deleted') {
+      mockDb.releases.permanentDelete(id);
+      setDeleteDialog(null);
+      toast({ title: "Релиз удалён навсегда" });
+    } else {
+      mockDb.releases.delete(id);
+      setDeleteDialog(null);
+      toast({ title: "Релиз перемещён в корзину" });
+    }
   };
 
   const handleRestoreRelease = (id: number) => {
@@ -289,13 +308,27 @@ const Index = () => {
   const moderationReleases = mockDb.releases.findByStatus('moderation');
   const allTickets = mockDb.tickets.findAll();
   
-  const filteredUserReleases = searchQuery 
-    ? userReleases.filter(r => r.title.toLowerCase().includes(searchQuery.toLowerCase()))
-    : userReleases;
+  const filteredUserReleases = userReleases.filter(r => {
+    const matchesSearch = searchQuery ? r.title.toLowerCase().includes(searchQuery.toLowerCase()) : true;
+    const matchesGenre = genreFilter === 'all' ? true : r.genre === genreFilter;
+    return matchesSearch && matchesGenre;
+  });
   
-  const filteredModerationReleases = searchQuery
-    ? moderationReleases.filter(r => r.title.toLowerCase().includes(searchQuery.toLowerCase()))
-    : moderationReleases;
+  const filteredModerationReleases = moderationReleases.filter(r => {
+    const matchesSearch = searchQuery ? r.title.toLowerCase().includes(searchQuery.toLowerCase()) : true;
+    const matchesGenre = genreFilter === 'all' ? true : r.genre === genreFilter;
+    return matchesSearch && matchesGenre;
+  });
+
+  const filteredUserTickets = userTickets.filter(t => {
+    if (ticketFilter === 'all') return true;
+    return t.status === ticketFilter;
+  });
+
+  const filteredAllTickets = allTickets.filter(t => {
+    if (ticketFilter === 'all') return true;
+    return t.status === ticketFilter;
+  });
 
   if (currentView === 'landing' && !currentUser) {
     return (
@@ -482,6 +515,10 @@ const Index = () => {
     );
   }
 
+  if (currentView === 'profile' && currentUser) {
+    return <ProfilePage user={currentUser} onBack={() => setCurrentView('dashboard')} />;
+  }
+
   if (currentUser?.role === 'admin') {
     return (
       <div className="min-h-screen bg-background">
@@ -494,9 +531,15 @@ const Index = () => {
               <span className="text-2xl font-bold gradient-text">kedoo</span>
               <Badge variant="outline" className="ml-2">Модератор</Badge>
             </div>
-            <div className="flex items-center gap-4">
-              <Button variant="ghost" size="icon" onClick={toggleTheme} className="rounded-full">
-                <Icon name={theme === 'light' ? 'Moon' : 'Sun'} size={20} />
+            <div className="flex items-center gap-2">
+              <ThemeSelector theme={theme} onThemeChange={changeTheme} />
+              <Button
+                variant="ghost"
+                size="icon"
+                className="rounded-full"
+                onClick={() => setCurrentView('profile')}
+              >
+                <Icon name="User" size={20} />
               </Button>
               <Button variant="outline" onClick={() => { setCurrentUser(null); setCurrentView('landing'); }}>
                 <Icon name="LogOut" size={18} className="mr-2" />
@@ -525,13 +568,28 @@ const Index = () => {
             </TabsList>
 
             <TabsContent value="moderation" className="space-y-4">
-              <div className="flex gap-2 mb-4">
+              <div className="flex flex-wrap gap-2 mb-4">
                 <Input
                   placeholder="Поиск по названию..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="max-w-md"
                 />
+                <Select value={genreFilter} onValueChange={setGenreFilter}>
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue placeholder="Все жанры" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Все жанры</SelectItem>
+                    <SelectItem value="Pop">Pop</SelectItem>
+                    <SelectItem value="Rock">Rock</SelectItem>
+                    <SelectItem value="Hip-Hop">Hip-Hop</SelectItem>
+                    <SelectItem value="Electronic">Electronic</SelectItem>
+                    <SelectItem value="Jazz">Jazz</SelectItem>
+                    <SelectItem value="Classical">Classical</SelectItem>
+                    <SelectItem value="Other">Другое</SelectItem>
+                  </SelectContent>
+                </Select>
                 {searchQuery && (
                   <Button variant="ghost" onClick={() => setSearchQuery('')}>
                     <Icon name="X" size={18} />
@@ -631,7 +689,20 @@ const Index = () => {
             </TabsContent>
 
             <TabsContent value="tickets" className="space-y-4">
-              {allTickets.length === 0 ? (
+              <div className="flex gap-2 mb-4">
+                <Select value={ticketFilter} onValueChange={(value: any) => setTicketFilter(value)}>
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue placeholder="Все тикеты" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Все тикеты</SelectItem>
+                    <SelectItem value="open">Открытые</SelectItem>
+                    <SelectItem value="answered">Отвеченные</SelectItem>
+                    <SelectItem value="closed">Закрытые</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {filteredAllTickets.length === 0 ? (
                 <Card>
                   <CardContent className="py-12 text-center">
                     <Icon name="Inbox" size={48} className="mx-auto text-muted-foreground mb-4" />
@@ -639,7 +710,7 @@ const Index = () => {
                   </CardContent>
                 </Card>
               ) : (
-                allTickets.map(ticket => {
+                filteredAllTickets.map(ticket => {
                   const user = mockDb.users.findById(ticket.user_id);
                   return (
                     <Card key={ticket.id}>
@@ -767,16 +838,73 @@ const Index = () => {
       <nav className="border-b">
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
+            <Sheet>
+              <SheetTrigger asChild>
+                <Button variant="ghost" size="icon" className="md:hidden">
+                  <Icon name="Menu" size={24} />
+                </Button>
+              </SheetTrigger>
+              <SheetContent side="left">
+                <div className="flex flex-col gap-4 mt-8">
+                  <Button
+                    variant={activeTab === 'releases' ? 'default' : 'ghost'}
+                    className="justify-start"
+                    onClick={() => { setActiveTab('releases'); setShowReleaseForm(false); }}
+                  >
+                    <Icon name="Disc" size={18} className="mr-2" />
+                    Релизы
+                  </Button>
+                  <Button
+                    variant={activeTab === 'trash' ? 'default' : 'ghost'}
+                    className="justify-start"
+                    onClick={() => { setActiveTab('trash'); setShowReleaseForm(false); }}
+                  >
+                    <Icon name="Trash2" size={18} className="mr-2" />
+                    Корзина
+                  </Button>
+                  <Button
+                    variant={showReleaseForm ? 'default' : 'ghost'}
+                    className="justify-start"
+                    onClick={() => { setShowReleaseForm(true); setEditingRelease(null); }}
+                  >
+                    <Icon name="PlusCircle" size={18} className="mr-2" />
+                    Добавить релиз
+                  </Button>
+                  <Button
+                    variant={activeTab === 'tickets' ? 'default' : 'ghost'}
+                    className="justify-start"
+                    onClick={() => { setActiveTab('tickets'); setShowReleaseForm(false); }}
+                  >
+                    <Icon name="MessageSquare" size={18} className="mr-2" />
+                    Тикеты
+                  </Button>
+                  <Button
+                    variant={activeTab === 'wallet' ? 'default' : 'ghost'}
+                    className="justify-start"
+                    onClick={() => { setActiveTab('wallet'); setShowReleaseForm(false); }}
+                  >
+                    <Icon name="Wallet" size={18} className="mr-2" />
+                    Кошелёк
+                  </Button>
+                </div>
+              </SheetContent>
+            </Sheet>
             <div className="w-10 h-10 rounded-xl gradient-primary flex items-center justify-center">
               <Icon name="Music" className="text-white" size={24} />
             </div>
             <span className="text-2xl font-bold gradient-text">kedoo</span>
           </div>
-          <div className="flex items-center gap-4">
-            <Button variant="ghost" size="icon" onClick={toggleTheme} className="rounded-full">
-              <Icon name={theme === 'light' ? 'Moon' : 'Sun'} size={20} />
+          <div className="flex items-center gap-2">
+            <ThemeSelector theme={theme} onThemeChange={changeTheme} />
+            <Button
+              variant="ghost"
+              size="icon"
+              className="rounded-full"
+              onClick={() => setCurrentView('profile')}
+            >
+              <Icon name="User" size={20} />
             </Button>
-            <Button variant="outline" onClick={() => { setCurrentUser(null); setCurrentView('landing'); }}>
+            <Button variant="outline" onClick={() => { setCurrentUser(null); setCurrentView('landing'); }} className="hidden sm:flex">
               <Icon name="LogOut" size={18} className="mr-2" />
               Выйти
             </Button>
@@ -785,11 +913,6 @@ const Index = () => {
       </nav>
 
       <div className="container mx-auto px-4 py-8">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold mb-2">Личный кабинет</h1>
-          <p className="text-muted-foreground">Управляйте своими релизами</p>
-        </div>
-
         {showReleaseForm ? (
           <ReleaseForm
             initialData={editingRelease}
@@ -825,13 +948,28 @@ const Index = () => {
             </TabsList>
 
             <TabsContent value="releases" className="space-y-4">
-              <div className="flex gap-2 mb-4">
+              <div className="flex flex-wrap gap-2 mb-4">
                 <Input
                   placeholder="Поиск по названию..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="max-w-md"
                 />
+                <Select value={genreFilter} onValueChange={setGenreFilter}>
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue placeholder="Все жанры" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Все жанры</SelectItem>
+                    <SelectItem value="Pop">Pop</SelectItem>
+                    <SelectItem value="Rock">Rock</SelectItem>
+                    <SelectItem value="Hip-Hop">Hip-Hop</SelectItem>
+                    <SelectItem value="Electronic">Electronic</SelectItem>
+                    <SelectItem value="Jazz">Jazz</SelectItem>
+                    <SelectItem value="Classical">Classical</SelectItem>
+                    <SelectItem value="Other">Другое</SelectItem>
+                  </SelectContent>
+                </Select>
                 {searchQuery && (
                   <Button variant="ghost" onClick={() => setSearchQuery('')}>
                     <Icon name="X" size={18} />
@@ -971,6 +1109,10 @@ const Index = () => {
                           <Icon name="RotateCcw" size={18} className="mr-2" />
                           Восстановить
                         </Button>
+                        <Button onClick={() => setDeleteDialog(release.id)} variant="destructive">
+                          <Icon name="Trash" size={18} className="mr-2" />
+                          Удалить навсегда
+                        </Button>
                       </div>
                     </CardContent>
                   </Card>
@@ -992,19 +1134,32 @@ const Index = () => {
             </TabsContent>
 
             <TabsContent value="tickets" className="space-y-4">
-              {!showTicketForm && (
-                <Button onClick={() => setShowTicketForm(true)} className="gradient-primary text-white mb-4">
-                  <Icon name="PlusCircle" size={18} className="mr-2" />
-                  Создать тикет
-                </Button>
-              )}
+              <div className="flex gap-2 mb-4">
+                {!showTicketForm && (
+                  <Button onClick={() => setShowTicketForm(true)} className="gradient-primary text-white">
+                    <Icon name="PlusCircle" size={18} className="mr-2" />
+                    Создать тикет
+                  </Button>
+                )}
+                <Select value={ticketFilter} onValueChange={(value: any) => setTicketFilter(value)}>
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue placeholder="Все тикеты" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Все тикеты</SelectItem>
+                    <SelectItem value="open">Открытые</SelectItem>
+                    <SelectItem value="answered">Отвеченные</SelectItem>
+                    <SelectItem value="closed">Закрытые</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
 
               {showTicketForm ? (
                 <TicketForm
                   onSubmit={handleCreateTicket}
                   onCancel={() => setShowTicketForm(false)}
                 />
-              ) : userTickets.length === 0 ? (
+              ) : filteredUserTickets.length === 0 ? (
                 <Card>
                   <CardContent className="py-12 text-center">
                     <Icon name="MessageSquare" size={48} className="mx-auto text-muted-foreground mb-4" />
@@ -1012,7 +1167,7 @@ const Index = () => {
                   </CardContent>
                 </Card>
               ) : (
-                userTickets.map(ticket => (
+                filteredUserTickets.map(ticket => (
                   <Card key={ticket.id}>
                     <CardHeader>
                       <div className="flex items-start justify-between">

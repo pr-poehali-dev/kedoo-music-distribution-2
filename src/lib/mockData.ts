@@ -82,6 +82,18 @@ export const mockDb = {
         return true;
       }
       return false;
+    },
+    permanentDelete: (id: number) => {
+      const index = releases.findIndex(r => r.id === id);
+      if (index !== -1) {
+        releases.splice(index, 1);
+        tracks.filter(t => t.release_id === id).forEach(t => {
+          const tIndex = tracks.findIndex(tr => tr.id === t.id);
+          if (tIndex !== -1) tracks.splice(tIndex, 1);
+        });
+        return true;
+      }
+      return false;
     }
   },
   tracks: {

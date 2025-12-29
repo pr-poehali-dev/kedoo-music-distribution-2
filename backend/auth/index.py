@@ -130,6 +130,80 @@ def handler(event: dict, context) -> dict:
                 'body': json.dumps({'success': True, 'user': user})
             }
         
+        elif action == 'change_email':
+            user_id = body.get('user_id')
+            current_password = body.get('current_password', '')
+            new_email = body.get('new_email', '').strip().lower()
+            
+            if not user_id or not current_password or not new_email:
+                return {
+                    'statusCode': 400,
+                    'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
+                    'body': json.dumps({'error': 'User ID, current password and new email are required'})
+                }
+            
+            # Проверка текущего пароля
+            cur.execute("SELECT password FROM users WHERE id = %s", (user_id,))
+            user_data = cur.fetchone()
+            if not user_data or not verify_password(current_password, user_data['password']):
+                return {
+                    'statusCode': 401,
+                    'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
+                    'body': json.dumps({'error': 'Invalid password'})
+                }
+            
+            # Проверка что новый email не занят
+            cur.execute("SELECT id FROM users WHERE email = %s AND id != %s", (new_email, user_id))
+            if cur.fetchone():
+                return {
+                    'statusCode': 400,
+                    'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
+                    'body': json.dumps({'error': 'Email already taken'})
+                }
+            
+            # Обновление email
+            cur.execute("UPDATE users SET email = %s WHERE id = %s", (new_email, user_id))
+            conn.commit()
+            
+            return {
+                'statusCode': 200,
+                'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
+                'body': json.dumps({'success': True, 'message': 'Email updated successfully'})
+            }
+        
+        elif action == 'change_password':
+            user_id = body.get('user_id')
+            current_password = body.get('current_password', '')
+            new_password = body.get('new_password', '')
+            
+            if not user_id or not current_password or not new_password:
+                return {
+                    'statusCode': 400,
+                    'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
+                    'body': json.dumps({'error': 'User ID, current password and new password are required'})
+                }
+            
+            # Проверка текущего пароля
+            cur.execute("SELECT password FROM users WHERE id = %s", (user_id,))
+            user_data = cur.fetchone()
+            if not user_data or not verify_password(current_password, user_data['password']):
+                return {
+                    'statusCode': 401,
+                    'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
+                    'body': json.dumps({'error': 'Invalid current password'})
+                }
+            
+            # Обновление пароля
+            hashed_password = hash_password(new_password)
+            cur.execute("UPDATE users SET password = %s WHERE id = %s", (hashed_password, user_id))
+            conn.commit()
+            
+            return {
+                'statusCode': 200,
+                'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
+                'body': json.dumps({'success': True, 'message': 'Password updated successfully'})
+            }
+        
         elif action == 'reset_password':
             email = body.get('email', '').strip().lower()
             new_password = body.get('new_password', '')

@@ -37,6 +37,8 @@ export interface Track {
   isrc?: string;
   language?: string;
   track_order: number;
+  lyrics?: string;
+  is_instrumental: boolean;
   created_at: string;
 }
 

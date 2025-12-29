@@ -18,6 +18,8 @@ interface Track {
   music_author?: string;
   lyrics_author?: string;
   has_explicit: boolean;
+  is_instrumental: boolean;
+  lyrics?: string;
   performers?: string;
   producers?: string;
   isrc?: string;
@@ -54,6 +56,7 @@ export const ReleaseForm = ({ initialData, onSave, onCancel }: ReleaseFormProps)
         id: `temp-${Date.now()}`,
         title: '',
         has_explicit: false,
+        is_instrumental: false,
         language: 'Русский'
       }
     ]);
@@ -345,6 +348,26 @@ export const ReleaseForm = ({ initialData, onSave, onCancel }: ReleaseFormProps)
                   />
                   <Label>В треке есть мат</Label>
                 </div>
+
+                <div className="flex items-center space-x-2">
+                  <Switch
+                    checked={track.is_instrumental}
+                    onCheckedChange={(checked) => updateTrack(track.id, 'is_instrumental', checked)}
+                  />
+                  <Label>Инструментальный трек</Label>
+                </div>
+
+                {!track.is_instrumental && (
+                  <div className="space-y-2">
+                    <Label>Текст песни</Label>
+                    <Textarea
+                      value={track.lyrics || ''}
+                      onChange={(e) => updateTrack(track.id, 'lyrics', e.target.value)}
+                      placeholder="Введите текст песни..."
+                      rows={6}
+                    />
+                  </div>
+                )}
               </div>
             </Card>
           ))}

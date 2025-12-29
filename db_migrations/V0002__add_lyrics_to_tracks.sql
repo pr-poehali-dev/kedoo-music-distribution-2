@@ -1,0 +1,2 @@
+ALTER TABLE tracks ADD COLUMN lyrics TEXT;
+ALTER TABLE tracks ADD COLUMN is_instrumental BOOLEAN DEFAULT false;
