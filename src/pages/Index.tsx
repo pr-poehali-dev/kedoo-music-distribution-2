@@ -1243,7 +1243,7 @@ const Index = () => {
             <DialogTitle>Новое обращение</DialogTitle>
           </DialogHeader>
           <TicketForm
-            onSave={handleCreateTicket}
+            onSubmit={handleCreateTicket}
             onCancel={() => setShowTicketForm(false)}
           />
         </DialogContent>
