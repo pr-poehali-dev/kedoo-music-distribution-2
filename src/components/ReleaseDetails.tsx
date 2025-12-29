@@ -13,6 +13,8 @@ interface ReleaseDetailsProps {
 }
 
 export const ReleaseDetails = ({ release, tracks, onClose, isAdmin }: ReleaseDetailsProps) => {
+  const tracksList = tracks || [];
+  
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between">
@@ -116,13 +118,13 @@ export const ReleaseDetails = ({ release, tracks, onClose, isAdmin }: ReleaseDet
 
       <Card>
         <CardHeader>
-          <CardTitle>Треклист ({tracks.length})</CardTitle>
+          <CardTitle>Треклист ({tracksList.length})</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          {tracks.length === 0 ? (
+          {tracksList.length === 0 ? (
             <p className="text-center text-muted-foreground py-8">Треков пока нет</p>
           ) : (
-            tracks.map((track, index) => (
+            tracksList.map((track, index) => (
               <Card key={track.id} className="p-4">
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex-1">
