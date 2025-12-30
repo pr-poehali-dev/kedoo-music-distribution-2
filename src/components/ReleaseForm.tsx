@@ -113,11 +113,18 @@ export const ReleaseForm = ({ initialData, onSave, onCancel }: ReleaseFormProps)
 
     onSave({
       ...albumData,
-      tracks
+      tracks,
+      status: 'moderation'
     });
   };
 
-
+  const handleSaveDraft = () => {
+    onSave({
+      ...albumData,
+      tracks,
+      status: 'draft'
+    });
+  };
 
   if (step === 'album') {
     return (
@@ -198,6 +205,9 @@ export const ReleaseForm = ({ initialData, onSave, onCancel }: ReleaseFormProps)
           <div className="flex gap-2 pt-4">
             <Button onClick={onCancel} variant="outline">
               Отмена
+            </Button>
+            <Button onClick={handleSaveDraft} variant="outline">
+              Сохранить черновик
             </Button>
             <Button
               onClick={() => setStep('tracks')}
@@ -372,6 +382,9 @@ export const ReleaseForm = ({ initialData, onSave, onCancel }: ReleaseFormProps)
               <Icon name="ArrowLeft" size={18} className="mr-2" />
               Назад
             </Button>
+            <Button onClick={handleSaveDraft} variant="outline">
+              Сохранить черновик
+            </Button>
             <Button
               onClick={() => setStep('preview')}
               disabled={tracks.length === 0}
@@ -444,6 +457,9 @@ export const ReleaseForm = ({ initialData, onSave, onCancel }: ReleaseFormProps)
           <Button onClick={() => setStep('tracks')} variant="outline">
             <Icon name="ArrowLeft" size={18} className="mr-2" />
             Назад
+          </Button>
+          <Button onClick={handleSaveDraft} variant="outline">
+            Сохранить черновик
           </Button>
           <Button
             onClick={handleSubmit}

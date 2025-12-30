@@ -173,7 +173,10 @@ const Index = () => {
 
   const handleSaveRelease = (data: any) => {
     if (editingRelease) {
-      const updateData = { ...data, status: 'pending', rejection_reason: undefined };
+      const updateData = { ...data };
+      if (data.status === 'moderation') {
+        updateData.rejection_reason = undefined;
+      }
       mockDb.releases.update(editingRelease.id, updateData);
       mockDb.tracks.deleteByReleaseId(editingRelease.id);
       if (data.tracks) {
@@ -190,7 +193,7 @@ const Index = () => {
       const release = mockDb.releases.create({
         ...data,
         user_id: currentUser!.id,
-        status: 'pending'
+        status: data.status || 'draft'
       });
 
       if (data.tracks) {
@@ -204,13 +207,15 @@ const Index = () => {
       }
 
       toast({
-        title: "Релиз отправлен на модерацию"
+        title: data.status === 'moderation' ? "Релиз отправлен на модерацию" : "Черновик сохранён"
       });
     }
 
     setShowReleaseForm(false);
     setEditingRelease(null);
-    setActiveTab('releases');
+    if (data.status === 'moderation') {
+      setActiveTab('releases');
+    }
   };
 
   const handleDeleteRelease = (id: number) => {
@@ -236,12 +241,15 @@ const Index = () => {
       });
       toast({ title: "Релиз восстановлен" });
     } else if (release) {
-      mockDb.releases.update(id, { status: 'pending', rejection_reason: undefined });
+      mockDb.releases.update(id, { status: 'approved', rejection_reason: undefined });
       toast({ title: "Релиз восстановлен" });
     }
   };
 
-
+  const handleRemoveFromModeration = (id: number) => {
+    mockDb.releases.update(id, { status: 'draft' });
+    toast({ title: "Релиз снят с модерации" });
+  };
 
   const handleApproveRelease = (id: number) => {
     mockDb.releases.update(id, { status: 'approved', rejection_reason: undefined });
@@ -285,7 +293,7 @@ const Index = () => {
   const getStatusBadge = (status: string) => {
     const variants: Record<string, any> = {
       draft: { label: 'Черновик', variant: 'secondary' },
-      pending: { label: 'На модерации', variant: 'default' },
+      moderation: { label: 'На модерации', variant: 'default' },
       approved: { label: 'Принят', variant: 'default' },
       rejected: { label: 'Отклонён', variant: 'destructive' },
       deleted: { label: 'Удалён', variant: 'outline' }
@@ -297,7 +305,7 @@ const Index = () => {
   const userReleases = currentUser ? mockDb.releases.findByUserId(currentUser.id) : [];
   const deletedReleases = currentUser ? mockDb.releases.findDeletedByUserId(currentUser.id) : [];
   const userTickets = currentUser ? mockDb.tickets.findByUserId(currentUser.id) : [];
-  const moderationReleases = mockDb.releases.findByStatus('pending');
+  const moderationReleases = mockDb.releases.findByStatus('moderation');
   const allTickets = mockDb.tickets.findAll();
   
   const filteredUserReleases = userReleases.filter(r => {
@@ -1001,7 +1009,7 @@ const Index = () => {
                           <Icon name="Eye" size={18} className="mr-2" />
                           Детали
                         </Button>
-                        {(release.status === 'pending' || release.status === 'rejected') && (
+                        {(release.status === 'draft' || release.status === 'rejected') && (
                           <>
                             <Button onClick={() => { 
                               const tracks = mockDb.tracks.findByReleaseId(release.id);
@@ -1017,15 +1025,21 @@ const Index = () => {
                             </Button>
                           </>
                         )}
-                        {release.status === 'pending' && (
-                          <Button onClick={() => { 
-                            const tracks = mockDb.tracks.findByReleaseId(release.id);
-                            setEditingRelease({ ...release, tracks }); 
-                            setShowReleaseForm(true); 
-                          }} variant="outline">
-                            <Icon name="Edit" size={18} className="mr-2" />
-                            Редактировать
-                          </Button>
+                        {release.status === 'moderation' && (
+                          <>
+                            <Button onClick={() => { 
+                              const tracks = mockDb.tracks.findByReleaseId(release.id);
+                              setEditingRelease({ ...release, tracks }); 
+                              setShowReleaseForm(true); 
+                            }} variant="outline">
+                              <Icon name="Edit" size={18} className="mr-2" />
+                              Редактировать
+                            </Button>
+                            <Button onClick={() => handleRemoveFromModeration(release.id)} variant="outline">
+                              <Icon name="X" size={18} className="mr-2" />
+                              Снять с модерации
+                            </Button>
+                          </>
                         )}
                         {release.status === 'approved' && (
                           <>
