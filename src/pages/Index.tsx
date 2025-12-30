@@ -293,7 +293,7 @@ const Index = () => {
   const getStatusBadge = (status: string) => {
     const variants: Record<string, any> = {
       draft: { label: 'Черновик', variant: 'secondary' },
-      moderation: { label: 'На модерации', variant: 'default' },
+      pending: { label: 'На модерации', variant: 'default' },
       approved: { label: 'Принят', variant: 'default' },
       rejected: { label: 'Отклонён', variant: 'destructive' },
       deleted: { label: 'Удалён', variant: 'outline' }

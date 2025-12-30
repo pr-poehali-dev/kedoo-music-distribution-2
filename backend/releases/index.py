@@ -108,6 +108,8 @@ def handler(event: dict, context) -> dict:
                     release_dict['old_release_date'] = release_dict['old_release_date'].isoformat()
                 if release_dict.get('new_release_date'):
                     release_dict['new_release_date'] = release_dict['new_release_date'].isoformat()
+                if release_dict.get('rejection_reason') is None:
+                    release_dict['rejection_reason'] = ''
                 releases_list.append(release_dict)
             
             return {

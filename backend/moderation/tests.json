@@ -1,0 +1,54 @@
+{
+  "tests": [
+    {
+      "name": "Get pending releases for moderation",
+      "method": "GET",
+      "path": "/?status=pending",
+      "headers": {
+        "X-Moderator-Id": "1"
+      },
+      "expectedStatus": 200,
+      "expectedBody": {
+        "releases": "array"
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Approve release",
+      "method": "POST",
+      "path": "/",
+      "headers": {
+        "X-Moderator-Id": "1"
+      },
+      "body": {
+        "action": "approve",
+        "release_id": 1
+      },
+      "expectedStatus": 200,
+      "expectedBody": {
+        "success": true,
+        "message": "string"
+      },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Reject release with reason",
+      "method": "POST",
+      "path": "/",
+      "headers": {
+        "X-Moderator-Id": "1"
+      },
+      "body": {
+        "action": "reject",
+        "release_id": 1,
+        "rejection_reason": "Низкое качество обложки"
+      },
+      "expectedStatus": 200,
+      "expectedBody": {
+        "success": true,
+        "message": "string"
+      },
+      "bodyMatcher": "partial"
+    }
+  ]
+}
