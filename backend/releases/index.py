@@ -151,7 +151,7 @@ def handler(event: dict, context) -> dict:
                 body.get('cover_url'),
                 body.get('old_release_date'),
                 body.get('new_release_date'),
-                body.get('status', 'draft')
+                body.get('status', 'pending')
             ))
             
             release_id = cursor.fetchone()['id']
