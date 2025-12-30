@@ -196,8 +196,8 @@ def handler(event: dict, context) -> dict:
             cursor.execute('''
                 UPDATE t_p4903350_kedoo_music_distribu.releases 
                 SET title = %s, upc = %s, genre = %s, cover_url = %s, 
-                    old_release_date = %s, new_release_date = %s, status = %s, 
-                    rejection_reason = %s, updated_at = NOW()
+                    old_release_date = %s, new_release_date = %s, status = 'pending', 
+                    rejection_reason = NULL, updated_at = NOW()
                 WHERE id = %s AND user_id = %s
             ''', (
                 body.get('title'),
@@ -206,8 +206,6 @@ def handler(event: dict, context) -> dict:
                 body.get('cover_url'),
                 body.get('old_release_date'),
                 body.get('new_release_date'),
-                body.get('status'),
-                body.get('rejection_reason'),
                 release_id,
                 int(user_id)
             ))
